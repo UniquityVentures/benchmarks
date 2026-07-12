@@ -2,9 +2,11 @@ module lamu-benchmark
 
 go 1.25.9
 
-replace github.com/UniquityVentures/lamu => ../../lamu
-
-require github.com/UniquityVentures/lamu v0.0.0-00010101000000-000000000000
+require (
+	github.com/UniquityVentures/lamu v0.6.18
+	gorm.io/gorm v1.31.1
+	maragu.dev/gomponents v1.3.0
+)
 
 require (
 	charm.land/bubbles/v2 v2.0.0 // indirect
@@ -60,6 +62,4 @@ require (
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
 	gorm.io/driver/sqlite v1.6.0 // indirect
-	gorm.io/gorm v1.31.1 // indirect
-	maragu.dev/gomponents v1.3.0 // indirect
 )
