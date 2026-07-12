@@ -1,0 +1,6 @@
+Debug = false
+DBType = "Postgres"
+Address = ":8123"
+
+[PostgresConfig]
+  DSN = "host=/run/postgresql user=postgres dbname=lamu_benchmark port=5432 sslmode=disable"
