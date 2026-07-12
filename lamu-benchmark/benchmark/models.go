@@ -32,7 +32,7 @@ func pluginDBInitHooks() lamu.PluginFeatures[lamu.DBInitHook] {
 				Value: func(db *gorm.DB) *gorm.DB {
 					sqlDB, err := db.DB()
 					if err == nil {
-						sqlDB.SetMaxOpenConns(100)
+						sqlDB.SetMaxOpenConns(1000)
 						sqlDB.SetMaxIdleConns(50)
 					}
 					return db
