@@ -33,9 +33,6 @@ func GetPlugin() registry.Pair[string, lamu.Plugin] {
 			Models: lamu.PluginStages(func() lamu.PluginFeatures[any] {
 				return pluginModels()
 			}),
-			DBInitHooks: lamu.PluginStages(func() lamu.PluginFeatures[lamu.DBInitHook] {
-				return pluginDBInitHooks()
-			}),
 		},
 	}
 }
