@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image/color"
 	"io"
 	"log"
 	"math/rand"
@@ -18,7 +19,6 @@ import (
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
 	"gonum.org/v1/plot/vg"
-	"image/color"
 )
 
 // TargetConfig represents a benchmark target with a Name and URL.
@@ -287,7 +287,7 @@ func main() {
 
 func runBenchmark(config Config) BenchmarkStats {
 	var activeTCPConns int32
-	var maxTCPConns int32
+	var maxTCPConns atomic.Int32
 
 	// Setup custom fasthttp client to monitor connections
 	client := &fasthttp.Client{
@@ -301,12 +301,12 @@ func runBenchmark(config Config) BenchmarkStats {
 
 			// Update maxTCPConns
 			for {
-				curMax := atomic.LoadInt32(&maxTCPConns)
+				curMax := maxTCPConns.Load()
 				curActive := atomic.LoadInt32(&activeTCPConns)
 				if curActive <= curMax {
 					break
 				}
-				if atomic.CompareAndSwapInt32(&maxTCPConns, curMax, curActive) {
+				if maxTCPConns.CompareAndSwap(curMax, curActive) {
 					break
 				}
 			}
@@ -325,10 +325,7 @@ func runBenchmark(config Config) BenchmarkStats {
 	defer cancel()
 
 	// Track RPS buckets (1-second intervals)
-	numSeconds := int(config.Duration.Seconds())
-	if numSeconds < 1 {
-		numSeconds = 1
-	}
+	numSeconds := max(int(config.Duration.Seconds()), 1)
 	rpsBuckets := make([]int64, numSeconds)
 	benchStart := time.Now()
 
@@ -410,7 +407,7 @@ func runBenchmark(config Config) BenchmarkStats {
 	}
 
 	return BenchmarkStats{
-		MaxConnections:     int64(atomic.LoadInt32(&maxTCPConns)),
+		MaxConnections:     int64(maxTCPConns.Load()),
 		AvgConnections:     avgConns,
 		MaxRPS:             maxRPS,
 		AvgRPS:             avgRPS,
@@ -535,7 +532,8 @@ func executeRequest(
 ) {
 	workflow := r.Intn(3) + 1
 
-	if workflow == 1 {
+	switch workflow {
+	case 1:
 		action := r.Intn(3) + 1
 		if action == 1 || pool.Len() == 0 {
 			// Create
@@ -599,7 +597,7 @@ func executeRequest(
 				}
 			}
 		}
-	} else if workflow == 2 {
+	case 2:
 		action := r.Intn(3) + 1
 		if action == 1 {
 			// Create
@@ -630,7 +628,7 @@ func executeRequest(
 				doRequest(client, "GET", baseURL+"/api/articles/", nil, false, metrics, benchStart, rpsBuckets)
 			}
 		}
-	} else {
+	default:
 		// Workflow 3
 		action := r.Intn(3) + 1
 		if action == 1 {
@@ -688,7 +686,7 @@ func plotMetric(
 	barWidth := vg.Points(12)
 
 	// Modern elegant color palette
-	var premiumColors = []color.RGBA{
+	premiumColors := []color.RGBA{
 		{R: 79, G: 70, B: 229, A: 255},  // Indigo #4F46E5
 		{R: 13, G: 148, B: 136, A: 255}, // Teal #0D9488
 		{R: 219, G: 39, B: 119, A: 255}, // Pink/Rose #DB2777

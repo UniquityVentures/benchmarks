@@ -1,16 +1,17 @@
 # List of durations to run the benchmark for (each duration will run sequentially)
-durations = ["5s", "10s", "30s", "60s"]
+durations = ["60s"]
 
 # Cooldown sleep durations between benchmark runs
-cooldowns = ["2s", "5s"]
+cooldowns = ["1s"]
 
 # List of worker counts (number of concurrent goroutines making requests)
-workers = [10, 50, 100, 200, 500]
+workers = [100, 200, 500]
 
 # Named target HTTP servers to benchmark
 [[targets]]
 name = "Lamu Local Server"
 url = "http://localhost:8123"
+
 
 [[targets]]
 name = "Django Local Server ASGI"
@@ -18,4 +19,4 @@ url = "http://localhost:8124"
 
 [[targets]]
 name = "Django Local Server WSGI"
-url = "http://localhost:8125"
+url = "http://192.168.0.5:8125"

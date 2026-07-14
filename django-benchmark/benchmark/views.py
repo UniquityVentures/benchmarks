@@ -3,19 +3,21 @@ from django.http import HttpResponse, JsonResponse
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-from django.shortcuts import get_object_or_404
+from django.shortcuts import aget_object_or_404
 from .models import Article
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ArticleListCreateView(View):
-    def get(self, request, *args, **kwargs):
-        articles = list(Article.objects.values('id', 'title', 'content', 'created_at', 'updated_at'))
+    async def get(self, request, *args, **kwargs):
+        articles = []
+        async for article in Article.objects.values('id', 'title', 'content', 'created_at', 'updated_at'):
+            articles.append(article)
         return JsonResponse(articles, safe=False)
     
-    def post(self, request, *args, **kwargs):
+    async def post(self, request, *args, **kwargs):
         try:
             data = json.loads(request.body)
-            article = Article.objects.create(
+            article = await Article.objects.acreate(
                 title=data.get('title', ''),
                 content=data.get('content', '')
             )
@@ -31,8 +33,8 @@ class ArticleListCreateView(View):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ArticleDetailUpdateDeleteView(View):
-    def get(self, request, pk, *args, **kwargs):
-        article = get_object_or_404(Article, pk=pk)
+    async def get(self, request, pk, *args, **kwargs):
+        article = await aget_object_or_404(Article, pk=pk)
         return JsonResponse({
             'id': article.id,
             'title': article.title,
@@ -41,13 +43,13 @@ class ArticleDetailUpdateDeleteView(View):
             'updated_at': article.updated_at.isoformat()
         })
         
-    def put(self, request, pk, *args, **kwargs):
-        article = get_object_or_404(Article, pk=pk)
+    async def put(self, request, pk, *args, **kwargs):
+        article = await aget_object_or_404(Article, pk=pk)
         try:
             data = json.loads(request.body)
             article.title = data.get('title', article.title)
             article.content = data.get('content', article.content)
-            article.save()
+            await article.asave()
             return JsonResponse({
                 'id': article.id,
                 'title': article.title,
@@ -58,7 +60,7 @@ class ArticleDetailUpdateDeleteView(View):
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
             
-    def delete(self, request, pk, *args, **kwargs):
-        article = get_object_or_404(Article, pk=pk)
-        article.delete()
+    async def delete(self, request, pk, *args, **kwargs):
+        article = await aget_object_or_404(Article, pk=pk)
+        await article.adelete()
         return HttpResponse(status=204)

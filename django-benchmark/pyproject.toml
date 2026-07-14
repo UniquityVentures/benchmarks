@@ -9,4 +9,5 @@ dependencies = [
     "psycopg[binary]",
     "gunicorn",
     "uvicorn",
+    "gevent>=26.5.0",
 ]
