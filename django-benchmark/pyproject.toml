@@ -10,4 +10,5 @@ dependencies = [
     "gunicorn",
     "uvicorn",
     "gevent>=26.5.0",
+    "a2wsgi>=1.10.10",
 ]
