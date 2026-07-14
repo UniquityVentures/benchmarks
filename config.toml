@@ -10,12 +10,12 @@ workers = [100, 200, 500]
 # Named target HTTP servers to benchmark
 [[targets]]
 name = "Lamu Local Server"
-url = "http://localhost:8123"
+url = "http://192.168.0.5:8123"
 
 
 [[targets]]
 name = "Django Local Server ASGI"
-url = "http://localhost:8124"
+url = "http://192.168.0.5:8124"
 
 [[targets]]
 name = "Django Local Server WSGI"
