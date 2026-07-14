@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -252,8 +253,24 @@ func main() {
 
 			log.Printf("BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
 				stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
-			log.Printf("Sleeping for cooldown: %s", config.Cooldown)
-			time.Sleep(config.Cooldown)
+
+			// Cooldown logic with DB truncation
+			log.Printf("Sleeping for 1 second before database truncation...")
+			time.Sleep(1 * time.Second)
+
+			truncateURL := config.Target.URL + "/api/truncate/"
+			log.Printf("Truncating database via endpoint: %s", truncateURL)
+			if err := sendTruncateRequest(truncateURL); err != nil {
+				log.Printf("Warning: failed to truncate database: %v", err)
+			} else {
+				log.Println("Database truncated successfully.")
+			}
+
+			remainingCooldown := config.Cooldown - 1*time.Second
+			if remainingCooldown > 0 {
+				log.Printf("Sleeping for remaining cooldown: %s", remainingCooldown)
+				time.Sleep(remainingCooldown)
+			}
 		}
 	}
 
@@ -464,6 +481,7 @@ func doRequest(
 	req.Header.SetMethod(method)
 	req.SetRequestURI(urlStr)
 	req.Header.Set("Cookie", "environment=%7B%7D")
+	req.Header.Set("Accept-Encoding", "gzip")
 	if isJSON {
 		req.Header.SetContentType("application/json")
 		if len(body) > 0 {
@@ -489,7 +507,18 @@ func doRequest(
 	bytesReceived := headerBytesReceived + int64(len(resp.Body()))
 
 	statusCode := resp.StatusCode()
-	respBody := resp.Body()
+	var respBody []byte
+	contentEncoding := resp.Header.Peek("Content-Encoding")
+	if bytes.EqualFold(contentEncoding, []byte("gzip")) {
+		var err error
+		respBody, err = resp.BodyGunzip()
+		if err != nil {
+			atomic.AddInt64(&metrics.Errors, 1)
+			return 0, nil
+		}
+	} else {
+		respBody = resp.Body()
+	}
 
 	// Update atomic metrics
 	atomic.AddInt64(&metrics.TotalRequests, 1)
@@ -765,4 +794,26 @@ func plotMetric(
 	plotHeight := vg.Points(350)
 
 	return p.Save(plotWidth, plotHeight, filename)
+}
+
+func sendTruncateRequest(urlStr string) error {
+	client := &fasthttp.Client{
+		Name: "benchmark-truncate-client",
+	}
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.Header.SetMethod("POST")
+	req.SetRequestURI(urlStr)
+
+	err := client.Do(req, resp)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != fasthttp.StatusNoContent && resp.StatusCode() != fasthttp.StatusOK {
+		return fmt.Errorf("unexpected status code: %d (body: %s)", resp.StatusCode(), resp.Body())
+	}
+	return nil
 }

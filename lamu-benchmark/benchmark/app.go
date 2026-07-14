@@ -33,6 +33,13 @@ func GetPlugin() registry.Pair[string, lamu.Plugin] {
 			Models: lamu.PluginStages(func() lamu.PluginFeatures[any] {
 				return pluginModels()
 			}),
+			Layers: lamu.PluginStages(func() lamu.PluginFeatures[views.GlobalLayer] {
+				return lamu.PluginFeatures[views.GlobalLayer]{
+					Entries: []registry.Pair[string, views.GlobalLayer]{
+						{Key: "gzip_layer", Value: GzipLayer{}},
+					},
+				}
+			}),
 		},
 	}
 }

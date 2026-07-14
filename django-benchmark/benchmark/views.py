@@ -64,3 +64,16 @@ class ArticleDetailUpdateDeleteView(View):
         article = await aget_object_or_404(Article, pk=pk)
         await article.adelete()
         return HttpResponse(status=204)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ArticleTruncateView(View):
+    async def post(self, request, *args, **kwargs):
+        from asgiref.sync import sync_to_async
+        from django.db import connection
+        
+        def do_truncate():
+            with connection.cursor() as cursor:
+                cursor.execute("TRUNCATE TABLE articles RESTART IDENTITY CASCADE;")
+                
+        await sync_to_async(do_truncate)()
+        return HttpResponse(status=204)
