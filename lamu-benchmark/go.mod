@@ -3,8 +3,7 @@ module lamu-benchmark
 go 1.25.9
 
 require (
-	github.com/UniquityVentures/lamu v0.6.18
-	gorm.io/gorm v1.31.1
+	github.com/UniquityVentures/lamu v0.6.22
 	maragu.dev/gomponents v1.3.0
 )
 
@@ -62,4 +61,5 @@ require (
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
 	gorm.io/driver/sqlite v1.6.0 // indirect
+	gorm.io/gorm v1.31.1 // indirect
 )
