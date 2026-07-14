@@ -77,3 +77,15 @@ class ArticleTruncateView(View):
                 
         await sync_to_async(do_truncate)()
         return HttpResponse(status=204)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class CounterView(View):
+    async def post(self, request, *args, **kwargs):
+        try:
+            data = json.loads(request.body)
+            counter = data.get('counter')
+            if counter is None:
+                return JsonResponse({'error': 'counter field is required'}, status=400)
+            return JsonResponse({'counter': int(counter) + 1})
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)

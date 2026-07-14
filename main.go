@@ -234,7 +234,7 @@ func main() {
 		}
 	}
 
-	// Permutation loop
+	// Permutation loop for CRUD
 	for _, target := range targets {
 		for _, sub := range subConfigs {
 			config := Config{
@@ -245,13 +245,13 @@ func main() {
 			}
 
 			log.Printf("================================================================================")
-			log.Printf("STARTING BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+			log.Printf("STARTING CRUD BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
 				config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
 
 			stats := runBenchmark(config)
 			results[config] = stats
 
-			log.Printf("BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+			log.Printf("CRUD BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
 				stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
 
 			// Cooldown logic with DB truncation
@@ -274,9 +274,37 @@ func main() {
 		}
 	}
 
+	// Permutation loop for Counter
+	counterResults := make(map[Config]BenchmarkStats)
+	for _, target := range targets {
+		for _, sub := range subConfigs {
+			config := Config{
+				Target:     target,
+				Duration:   sub.Duration,
+				Cooldown:   sub.Cooldown,
+				NumWorkers: sub.NumWorkers,
+			}
+
+			log.Printf("================================================================================")
+			log.Printf("STARTING COUNTER BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+				config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
+
+			stats := runCounterBenchmark(config)
+			counterResults[config] = stats
+
+			log.Printf("COUNTER BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+				stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
+
+			if config.Cooldown > 0 {
+				log.Printf("Sleeping for cooldown: %s", config.Cooldown)
+				time.Sleep(config.Cooldown)
+			}
+		}
+	}
+
 	// Plot results
 	log.Println("================================================================================")
-	log.Println("Generating SVG Plots...")
+	log.Println("Generating SVG Plots for CRUD...")
 	metricsToPlot := []struct {
 		name   string
 		yLabel string
@@ -294,6 +322,29 @@ func main() {
 
 	for _, m := range metricsToPlot {
 		if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, results); err != nil {
+			log.Fatalf("Error plotting %q: %v", m.name, err)
+		}
+		log.Printf("Saved plot: %s", m.file)
+	}
+
+	log.Println("Generating SVG Plots for Counter...")
+	counterMetricsToPlot := []struct {
+		name   string
+		yLabel string
+		file   string
+	}{
+		{"Average RPS", "Requests Per Second", "counter_average_rps.svg"},
+		{"Max RPS", "Requests Per Second", "counter_max_rps.svg"},
+		{"Average Latency (ms)", "Latency (ms)", "counter_average_latency.svg"},
+		{"Max Latency (ms)", "Latency (ms)", "counter_max_latency.svg"},
+		{"Average Connections", "TCP Connections", "counter_average_connections.svg"},
+		{"Max Connections", "TCP Connections", "counter_max_connections.svg"},
+		{"Total Bytes Received (MB)", "Data Received (MB)", "counter_total_bytes_received.svg"},
+		{"Average Bytes Received (KB)", "Data Received (KB)", "counter_average_bytes_received.svg"},
+	}
+
+	for _, m := range counterMetricsToPlot {
+		if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, counterResults); err != nil {
 			log.Fatalf("Error plotting %q: %v", m.name, err)
 		}
 		log.Printf("Saved plot: %s", m.file)
@@ -816,4 +867,154 @@ func sendTruncateRequest(urlStr string) error {
 		return fmt.Errorf("unexpected status code: %d (body: %s)", resp.StatusCode(), resp.Body())
 	}
 	return nil
+}
+
+func executeCounterRequest(
+	client *fasthttp.Client,
+	baseURL string,
+	metrics *WorkerMetrics,
+	benchStart time.Time,
+	rpsBuckets []int64,
+) {
+	body := []byte(`{"counter":42}`)
+	doRequest(client, "POST", baseURL+"/api/counter/", body, true, metrics, benchStart, rpsBuckets)
+}
+
+func runCounterBenchmark(config Config) BenchmarkStats {
+	var activeTCPConns int32
+	var maxTCPConns atomic.Int32
+
+	// Setup custom fasthttp client to monitor connections
+	client := &fasthttp.Client{
+		Name: "go-benchmark-client",
+		Dial: func(addr string) (net.Conn, error) {
+			conn, err := fasthttp.Dial(addr)
+			if err != nil {
+				return nil, err
+			}
+			atomic.AddInt32(&activeTCPConns, 1)
+
+			// Update maxTCPConns
+			for {
+				curMax := maxTCPConns.Load()
+				curActive := atomic.LoadInt32(&activeTCPConns)
+				if curActive <= curMax {
+					break
+				}
+				if maxTCPConns.CompareAndSwap(curMax, curActive) {
+					break
+				}
+			}
+
+			return &watchedConn{
+				Conn:        conn,
+				activeCount: &activeTCPConns,
+			}, nil
+		},
+	}
+
+	metrics := &WorkerMetrics{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
+	defer cancel()
+
+	// Track RPS buckets (1-second intervals)
+	numSeconds := max(int(config.Duration.Seconds()), 1)
+	rpsBuckets := make([]int64, numSeconds)
+	benchStart := time.Now()
+
+	// Start connection sampler
+	var connSamplesSum int64
+	var connSamplesCount int64
+	var connSamplesMu sync.Mutex
+	sampleCtx, sampleCancel := context.WithCancel(context.Background())
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-sampleCtx.Done():
+				return
+			case <-ticker.C:
+				val := atomic.LoadInt32(&activeTCPConns)
+				connSamplesMu.Lock()
+				connSamplesSum += int64(val)
+				connSamplesCount++
+				connSamplesMu.Unlock()
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(config.NumWorkers)
+
+	for i := 0; i < config.NumWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					executeCounterRequest(client, config.Target.URL, metrics, benchStart, rpsBuckets)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	sampleCancel()
+
+	// Compute finalized stats
+	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
+	avgRPS := float64(totalReqs) / config.Duration.Seconds()
+
+	maxRPS := float64(0)
+	for _, val := range rpsBuckets {
+		if float64(val) > maxRPS {
+			maxRPS = float64(val)
+		}
+	}
+
+	avgLatency := time.Duration(0)
+	if totalReqs > 0 {
+		avgLatency = time.Duration(atomic.LoadInt64(&metrics.TotalLatency) / totalReqs)
+	}
+
+	avgConns := float64(0)
+	connSamplesMu.Lock()
+	if connSamplesCount > 0 {
+		avgConns = float64(connSamplesSum) / float64(connSamplesCount)
+	}
+	connSamplesMu.Unlock()
+
+	avgBytesSent := float64(0)
+	if totalReqs > 0 {
+		avgBytesSent = float64(atomic.LoadInt64(&metrics.TotalBytesSent)) / float64(totalReqs)
+	}
+
+	avgBytesRecv := float64(0)
+	if totalReqs > 0 {
+		avgBytesRecv = float64(atomic.LoadInt64(&metrics.TotalBytesReceived)) / float64(totalReqs)
+	}
+
+	return BenchmarkStats{
+		MaxConnections:     int64(maxTCPConns.Load()),
+		AvgConnections:     avgConns,
+		MaxRPS:             maxRPS,
+		AvgRPS:             avgRPS,
+		MaxLatency:         time.Duration(atomic.LoadInt64(&metrics.MaxLatency)),
+		AvgLatency:         avgLatency,
+		AvgBytesSent:       avgBytesSent,
+		MaxBytesSent:       atomic.LoadInt64(&metrics.MaxBytesSent),
+		TotalBytesSent:     atomic.LoadInt64(&metrics.TotalBytesSent),
+		AvgBytesReceived:   avgBytesRecv,
+		MaxBytesReceived:   atomic.LoadInt64(&metrics.MaxBytesReceived),
+		TotalBytesReceived: atomic.LoadInt64(&metrics.TotalBytesReceived),
+		TotalRequests:      totalReqs,
+		SuccessRequests:    atomic.LoadInt64(&metrics.SuccessRequests),
+		FailedRequests:     atomic.LoadInt64(&metrics.FailedRequests),
+		Errors:             atomic.LoadInt64(&metrics.Errors),
+	}
 }

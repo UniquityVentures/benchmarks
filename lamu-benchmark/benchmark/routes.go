@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/UniquityVentures/lamu/getters"
@@ -61,6 +62,27 @@ func pluginRoutes() lamu.PluginFeatures[lamu.Route] {
 							return
 						}
 						w.WriteHeader(http.StatusNoContent)
+					}),
+				},
+			},
+			{
+				Key: "benchmark.CounterRoute",
+				Value: lamu.Route{
+					Path: "POST /api/counter/",
+					Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						var req struct {
+							Counter int `json:"counter"`
+						}
+						if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						req.Counter++
+						w.Header().Set("Content-Type", "application/json")
+						if err := json.NewEncoder(w).Encode(req); err != nil {
+							http.Error(w, err.Error(), http.StatusInternalServerError)
+							return
+						}
 					}),
 				},
 			},
