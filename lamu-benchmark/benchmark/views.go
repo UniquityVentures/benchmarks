@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/UniquityVentures/lamu/components"
-	"github.com/UniquityVentures/lamu/getters"
-	"github.com/UniquityVentures/lamu/lamu"
-	"github.com/UniquityVentures/lamu/registry"
-	"github.com/UniquityVentures/lamu/views"
+	"github.com/lariv-in/lago"
+	"github.com/lariv-in/lago/components"
+	"github.com/lariv-in/lago/getters"
+	"github.com/lariv-in/lago/registry"
+	"github.com/lariv-in/lago/views"
 	"maragu.dev/gomponents"
 )
 
@@ -119,8 +119,8 @@ func (l JSONResponseLayer[T]) Next(view views.View, next http.Handler) http.Hand
 	})
 }
 
-func pluginViews() lamu.PluginFeatures[*views.View] {
-	return lamu.PluginFeatures[*views.View]{
+func pluginViews() lago.PluginFeatures[*views.View] {
+	return lago.PluginFeatures[*views.View]{
 		Entries: []registry.Pair[string, *views.View]{
 			{
 				Key: "benchmark.ListRouteView",
@@ -130,13 +130,13 @@ func pluginViews() lamu.PluginFeatures[*views.View] {
 						return DummyPage{}, true
 					},
 					Layers: []registry.Pair[string, views.Layer]{
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "list",
 							Value: views.LayerList[Article]{
 								Key: getters.Static("articles"),
 							},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "json_response",
 							Value: JSONResponseLayer[Article]{
 								Key: "articles",
@@ -153,11 +153,11 @@ func pluginViews() lamu.PluginFeatures[*views.View] {
 						return DummyPage{}, true
 					},
 					Layers: []registry.Pair[string, views.Layer]{
-						registry.Pair[string, views.Layer]{
+						{
 							Key:   "create",
 							Value: views.LayerCreate[Article]{},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "json_response",
 							Value: JSONResponseLayer[Article]{
 								Key:    "$id",
@@ -175,14 +175,14 @@ func pluginViews() lamu.PluginFeatures[*views.View] {
 						return DummyPage{}, true
 					},
 					Layers: []registry.Pair[string, views.Layer]{
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "detail",
 							Value: views.LayerDetail[Article]{
 								Key:          getters.Static("article"),
 								PathParamKey: getters.Static("id"),
 							},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "json_response",
 							Value: JSONResponseLayer[Article]{
 								Key: "article",
@@ -199,24 +199,24 @@ func pluginViews() lamu.PluginFeatures[*views.View] {
 						return DummyPage{}, true
 					},
 					Layers: []registry.Pair[string, views.Layer]{
-						registry.Pair[string, views.Layer]{
+						{
 							Key:   "override",
 							Value: HTTPMethodOverrideLayer{},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "detail",
 							Value: views.LayerDetail[Article]{
 								Key:          getters.Static("article"),
 								PathParamKey: getters.Static("id"),
 							},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "update",
 							Value: views.LayerUpdate[Article]{
 								Key: getters.Static("article"),
 							},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "json_response",
 							Value: JSONResponseLayer[Article]{
 								Key: "article",
@@ -233,24 +233,24 @@ func pluginViews() lamu.PluginFeatures[*views.View] {
 						return DummyPage{}, true
 					},
 					Layers: []registry.Pair[string, views.Layer]{
-						registry.Pair[string, views.Layer]{
+						{
 							Key:   "override",
 							Value: HTTPMethodOverrideLayer{},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "detail",
 							Value: views.LayerDetail[Article]{
 								Key:          getters.Static("article"),
 								PathParamKey: getters.Static("id"),
 							},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "delete",
 							Value: views.LayerDelete[Article]{
 								Key: getters.Static("article"),
 							},
 						},
-						registry.Pair[string, views.Layer]{
+						{
 							Key: "json_response",
 							Value: JSONResponseLayer[Article]{
 								Status: http.StatusNoContent,

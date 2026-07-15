@@ -4,52 +4,53 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/UniquityVentures/lamu/getters"
-	"github.com/UniquityVentures/lamu/lamu"
-	"github.com/UniquityVentures/lamu/registry"
+	"github.com/lariv-in/lago"
+	"github.com/lariv-in/lago/getters"
+	"github.com/lariv-in/lago/registry"
+	"golang.org/x/net/websocket"
 )
 
-func pluginRoutes() lamu.PluginFeatures[lamu.Route] {
-	return lamu.PluginFeatures[lamu.Route]{
-		Entries: []registry.Pair[string, lamu.Route]{
+func pluginRoutes() lago.PluginFeatures[lago.Route] {
+	return lago.PluginFeatures[lago.Route]{
+		Entries: []registry.Pair[string, lago.Route]{
 			{
 				Key: "benchmark.ListRoute",
-				Value: lamu.Route{
+				Value: lago.Route{
 					Path:    "GET /api/articles/",
-					Handler: lamu.NewDynamicView("benchmark.ListRouteView"),
+					Handler: lago.NewDynamicView("benchmark.ListRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.CreateRoute",
-				Value: lamu.Route{
+				Value: lago.Route{
 					Path:    "POST /api/articles/",
-					Handler: lamu.NewDynamicView("benchmark.CreateRouteView"),
+					Handler: lago.NewDynamicView("benchmark.CreateRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.DetailRoute",
-				Value: lamu.Route{
+				Value: lago.Route{
 					Path:    "GET /api/articles/{id}/",
-					Handler: lamu.NewDynamicView("benchmark.DetailRouteView"),
+					Handler: lago.NewDynamicView("benchmark.DetailRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.UpdateRoute",
-				Value: lamu.Route{
+				Value: lago.Route{
 					Path:    "PUT /api/articles/{id}/",
-					Handler: lamu.NewDynamicView("benchmark.UpdateRouteView"),
+					Handler: lago.NewDynamicView("benchmark.UpdateRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.DeleteRoute",
-				Value: lamu.Route{
+				Value: lago.Route{
 					Path:    "DELETE /api/articles/{id}/",
-					Handler: lamu.NewDynamicView("benchmark.DeleteRouteView"),
+					Handler: lago.NewDynamicView("benchmark.DeleteRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.TruncateRoute",
-				Value: lamu.Route{
+				Value: lago.Route{
 					Path: "POST /api/truncate/",
 					Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						db, err := getters.DBFromContext(r.Context())
@@ -67,7 +68,7 @@ func pluginRoutes() lamu.PluginFeatures[lamu.Route] {
 			},
 			{
 				Key: "benchmark.CounterRoute",
-				Value: lamu.Route{
+				Value: lago.Route{
 					Path: "POST /api/counter/",
 					Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						var req struct {
@@ -84,6 +85,13 @@ func pluginRoutes() lamu.PluginFeatures[lamu.Route] {
 							return
 						}
 					}),
+				},
+			},
+			{
+				Key: "benchmark.WebsocketRoute",
+				Value: lago.Route{
+					Path:    "GET /api/ws/",
+					Handler: websocket.Handler(BenchmarkWSHandler),
 				},
 			},
 		},

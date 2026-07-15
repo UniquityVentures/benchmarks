@@ -3,4 +3,4 @@ DBType = "Postgres"
 Address = ":8123"
 
 [PostgresConfig]
-  DSN = "host=/run/postgresql user=postgres dbname=lamu_benchmark port=5432 sslmode=disable"
+  DSN = "host=/run/postgresql user=postgres dbname=lago_benchmark port=5432 sslmode=disable"

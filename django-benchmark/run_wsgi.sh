@@ -5,4 +5,4 @@ exec uv run gunicorn config.wsgi:application \
   --bind 0.0.0.0:8125 \
   --workers 4 \
   --worker-class gthread \
-  --threads 10
+  --threads 4

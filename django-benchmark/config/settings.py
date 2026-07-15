@@ -37,8 +37,11 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "benchmark",
 ]
+
+ASGI_APPLICATION = "config.asgi.application"
 
 MIDDLEWARE = [
     "django.middleware.gzip.GZipMiddleware",

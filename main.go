@@ -11,16 +11,124 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/valyala/fasthttp"
+	"golang.org/x/net/websocket"
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
 	"gonum.org/v1/plot/vg"
 )
+
+type WSSmallPayload struct {
+	Type      string `json:"type"`
+	Timestamp int64  `json:"timestamp"`
+	ClientID  string `json:"client_id"`
+	Seq       int    `json:"seq"`
+	Payload   string `json:"payload"`
+}
+
+type WSMetric struct {
+	ID     int     `json:"id"`
+	Name   string  `json:"name"`
+	Value  float64 `json:"value"`
+	Status string  `json:"status"`
+}
+
+type WSMediumPayload struct {
+	Type      string            `json:"type"`
+	Timestamp int64             `json:"timestamp"`
+	Meta      map[string]string `json:"meta"`
+	Metrics   []WSMetric        `json:"metrics"`
+}
+
+type WSAuthor struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type WSRecord struct {
+	ID     string   `json:"id"`
+	Title  string   `json:"title"`
+	Body   string   `json:"body"`
+	Tags   []string `json:"tags"`
+	Author WSAuthor `json:"author"`
+}
+
+type WSLargePayload struct {
+	Type         string     `json:"type"`
+	SyncID       string     `json:"sync_id"`
+	RecordsCount int        `json:"records_count"`
+	Records      []WSRecord `json:"records"`
+}
+
+type WSRequest struct {
+	Query string `json:"query"`
+	Data  any    `json:"data"`
+}
+
+var (
+	clientSmallPayload  WSSmallPayload
+	clientMediumPayload WSMediumPayload
+	clientLargePayload  WSLargePayload
+)
+
+func init() {
+	clientSmallPayload = WSSmallPayload{
+		Type:      "ping",
+		Timestamp: 1783993200123,
+		ClientID:  "client_8b31a",
+		Seq:       1024,
+		Payload:   "hello",
+	}
+
+	meta := map[string]string{
+		"session_id": "sess_812da1823abf",
+		"user_role":  "editor",
+		"version":    "1.4.0",
+	}
+	metrics := make([]WSMetric, 50)
+	for i := 0; i < 50; i++ {
+		metrics[i] = WSMetric{
+			ID:     i + 1,
+			Name:   fmt.Sprintf("metric_name_indicator_%d", i),
+			Value:  float64(i) * 1.5,
+			Status: "ok",
+		}
+	}
+	clientMediumPayload = WSMediumPayload{
+		Type:      "dashboard_update",
+		Timestamp: 1783993200123,
+		Meta:      meta,
+		Metrics:   metrics,
+	}
+
+	records := make([]WSRecord, 500)
+	dummyBody := "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
+	for i := 0; i < 500; i++ {
+		records[i] = WSRecord{
+			ID:     fmt.Sprintf("rec_%04d", i+1),
+			Title:  fmt.Sprintf("Random Article Title %04d", i+1),
+			Body:   dummyBody,
+			Tags:   []string{"performance", "benchmark", "websocket", "go"},
+			Author: WSAuthor{
+				Name:  "Jane Doe",
+				Email: "jane.doe@example.com",
+			},
+		}
+	}
+	clientLargePayload = WSLargePayload{
+		Type:         "bulk_sync",
+		SyncID:       "sync_91238ba18",
+		RecordsCount: 500,
+		Records:      records,
+	}
+}
 
 // TargetConfig represents a benchmark target with a Name and URL.
 type TargetConfig struct {
@@ -302,6 +410,57 @@ func main() {
 		}
 	}
 
+	// Permutation loop for WebSockets (9 stages)
+	wsResults := make(map[string]map[Config]BenchmarkStats)
+	wsStages := []struct {
+		client string
+		server string
+	}{
+		{"small", "small"},
+		{"small", "medium"},
+		{"small", "large"},
+		{"medium", "small"},
+		{"medium", "medium"},
+		{"medium", "large"},
+		{"large", "small"},
+		{"large", "medium"},
+		{"large", "large"},
+	}
+
+	for _, stage := range wsStages {
+		stageName := fmt.Sprintf("WS_%s_req_%s_resp", stage.client, stage.server)
+		wsResults[stageName] = make(map[Config]BenchmarkStats)
+		for _, target := range targets {
+			// Skip WSGI targets as WSGI fundamentally does not support WebSockets
+			if strings.Contains(strings.ToLower(target.Name), "wsgi") {
+				continue
+			}
+			for _, sub := range subConfigs {
+				config := Config{
+					Target:     target,
+					Duration:   sub.Duration,
+					Cooldown:   sub.Cooldown,
+					NumWorkers: sub.NumWorkers,
+				}
+
+				log.Printf("================================================================================")
+				log.Printf("STARTING WEBSOCKET BENCHMARK (%s): Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+					stageName, config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
+
+				stats := runWebsocketBenchmark(config, stage.client, stage.server)
+				wsResults[stageName][config] = stats
+
+				log.Printf("WEBSOCKET BENCHMARK (%s) FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+					stageName, stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
+
+				if config.Cooldown > 0 {
+					log.Printf("Sleeping for cooldown: %s", config.Cooldown)
+					time.Sleep(config.Cooldown)
+				}
+			}
+		}
+	}
+
 	// Plot results
 	log.Println("================================================================================")
 	log.Println("Generating SVG Plots for CRUD...")
@@ -350,7 +509,29 @@ func main() {
 		log.Printf("Saved plot: %s", m.file)
 	}
 
+	// Generate WS plots for each worker count configuration
+	log.Println("Generating SVG Plots for WebSockets...")
+	for _, subConfig := range subConfigs {
+		// Only plot one duration configuration to avoid duplicate charts
+		if len(durations) > 0 && subConfig.Duration != durations[0] {
+			continue
+		}
+
+		rpsFile := fmt.Sprintf("websocket_average_rps_w%d.svg", subConfig.NumWorkers)
+		if err := plotWSMetric("Average RPS", "Requests Per Second", rpsFile, targets, subConfig, wsStages, wsResults); err != nil {
+			log.Fatalf("Error plotting WS RPS: %v", err)
+		}
+		log.Printf("Saved plot: %s", rpsFile)
+
+		latFile := fmt.Sprintf("websocket_average_latency_w%d.svg", subConfig.NumWorkers)
+		if err := plotWSMetric("Average Latency (ms)", "Latency (ms)", latFile, targets, subConfig, wsStages, wsResults); err != nil {
+			log.Fatalf("Error plotting WS Latency: %v", err)
+		}
+		log.Printf("Saved plot: %s", latFile)
+	}
+
 	log.Println("All benchmarks completed successfully and plots generated.")
+	saveMetricsJSON("benchmark_metrics.json", results, counterResults, wsResults)
 }
 
 func runBenchmark(config Config) BenchmarkStats {
@@ -1017,4 +1198,342 @@ func runCounterBenchmark(config Config) BenchmarkStats {
 		FailedRequests:     atomic.LoadInt64(&metrics.FailedRequests),
 		Errors:             atomic.LoadInt64(&metrics.Errors),
 	}
+}
+
+func runWebsocketBenchmark(config Config, clientSize, serverSize string) BenchmarkStats {
+	metrics := &WorkerMetrics{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
+	defer cancel()
+
+	// Track RPS buckets (1-second intervals)
+	numSeconds := max(int(config.Duration.Seconds()), 1)
+	rpsBuckets := make([]int64, numSeconds)
+	benchStart := time.Now()
+
+	// Determine client payload
+	var dataPayload any
+	switch clientSize {
+	case "medium":
+		dataPayload = clientMediumPayload
+	case "large":
+		dataPayload = clientLargePayload
+	default:
+		dataPayload = clientSmallPayload
+	}
+
+	reqPayload := WSRequest{
+		Query: serverSize,
+		Data:  dataPayload,
+	}
+
+	// Prepare raw payload bytes to avoid JSON marshal inside the loop
+	reqBytes, err := json.Marshal(reqPayload)
+	if err != nil {
+		log.Fatalf("failed to marshal websocket request payload: %v", err)
+	}
+
+	var activeTCPConns int32
+	var maxTCPConns atomic.Int32
+
+	var wg sync.WaitGroup
+	wg.Add(config.NumWorkers)
+
+	for i := 0; i < config.NumWorkers; i++ {
+		go func() {
+			defer wg.Done()
+
+			// Resolve WebSocket URL
+			wsURL := config.Target.URL + "/api/ws/"
+			if strings.HasPrefix(wsURL, "http://") {
+				wsURL = "ws://" + strings.TrimPrefix(wsURL, "http://")
+			} else if strings.HasPrefix(wsURL, "https://") {
+				wsURL = "wss://" + strings.TrimPrefix(wsURL, "https://")
+			}
+			origin := config.Target.URL
+
+			ws, err := websocket.Dial(wsURL, "", origin)
+			if err != nil {
+				errCount := atomic.AddInt64(&metrics.Errors, 1)
+				if errCount == 1 {
+					log.Printf("Websocket connection failed to %s: %v (first error shown)", wsURL, err)
+				}
+				return
+			}
+			defer ws.Close()
+
+			atomic.AddInt32(&activeTCPConns, 1)
+			for {
+				curMax := maxTCPConns.Load()
+				curActive := atomic.LoadInt32(&activeTCPConns)
+				if curActive <= curMax {
+					break
+				}
+				if maxTCPConns.CompareAndSwap(curMax, curActive) {
+					break
+				}
+			}
+
+			// Read/Write loop
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					start := time.Now()
+
+					// Send raw bytes using Message codec
+					err := websocket.Message.Send(ws, string(reqBytes))
+					if err != nil {
+						atomic.AddInt64(&metrics.Errors, 1)
+						return
+					}
+
+					// Receive response
+					var respStr string
+					err = websocket.Message.Receive(ws, &respStr)
+					if err != nil {
+						atomic.AddInt64(&metrics.Errors, 1)
+						return
+					}
+
+					latency := time.Since(start)
+
+					// Calculate bytes sent/received
+					bytesSent := int64(len(reqBytes))
+					bytesReceived := int64(len(respStr))
+
+					atomic.AddInt64(&metrics.TotalRequests, 1)
+					atomic.AddInt64(&metrics.TotalBytesSent, bytesSent)
+					atomic.AddInt64(&metrics.TotalBytesReceived, bytesReceived)
+					updateMax(&metrics.MaxBytesSent, bytesSent)
+					updateMax(&metrics.MaxBytesReceived, bytesReceived)
+					updateMax(&metrics.MaxLatency, int64(latency))
+					atomic.AddInt64(&metrics.TotalLatency, int64(latency))
+					atomic.AddInt64(&metrics.SuccessRequests, 1)
+
+					bucket := int(time.Since(benchStart).Seconds())
+					if bucket >= 0 && bucket < len(rpsBuckets) {
+						atomic.AddInt64(&rpsBuckets[bucket], 1)
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Compute finalized stats
+	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
+	avgRPS := float64(totalReqs) / config.Duration.Seconds()
+
+	maxRPS := float64(0)
+	for _, val := range rpsBuckets {
+		if float64(val) > maxRPS {
+			maxRPS = float64(val)
+		}
+	}
+
+	avgLatency := time.Duration(0)
+	if totalReqs > 0 {
+		avgLatency = time.Duration(atomic.LoadInt64(&metrics.TotalLatency) / totalReqs)
+	}
+
+	avgBytesSent := float64(0)
+	if totalReqs > 0 {
+		avgBytesSent = float64(atomic.LoadInt64(&metrics.TotalBytesSent)) / float64(totalReqs)
+	}
+
+	avgBytesRecv := float64(0)
+	if totalReqs > 0 {
+		avgBytesRecv = float64(atomic.LoadInt64(&metrics.TotalBytesReceived)) / float64(totalReqs)
+	}
+
+	return BenchmarkStats{
+		MaxConnections:     int64(maxTCPConns.Load()),
+		AvgConnections:     float64(maxTCPConns.Load()),
+		MaxRPS:             maxRPS,
+		AvgRPS:             avgRPS,
+		MaxLatency:         time.Duration(atomic.LoadInt64(&metrics.MaxLatency)),
+		AvgLatency:         avgLatency,
+		AvgBytesSent:       avgBytesSent,
+		MaxBytesSent:       atomic.LoadInt64(&metrics.MaxBytesSent),
+		TotalBytesSent:     atomic.LoadInt64(&metrics.TotalBytesSent),
+		AvgBytesReceived:   avgBytesRecv,
+		MaxBytesReceived:   atomic.LoadInt64(&metrics.MaxBytesReceived),
+		TotalBytesReceived: atomic.LoadInt64(&metrics.TotalBytesReceived),
+		TotalRequests:      totalReqs,
+		SuccessRequests:    atomic.LoadInt64(&metrics.SuccessRequests),
+		FailedRequests:     atomic.LoadInt64(&metrics.FailedRequests),
+		Errors:             atomic.LoadInt64(&metrics.Errors),
+	}
+}
+
+func plotWSMetric(
+	metricName string,
+	yLabel string,
+	filename string,
+	targets []TargetConfig,
+	subConfig SubConfig,
+	wsStages []struct{ client, server string },
+	wsResults map[string]map[Config]BenchmarkStats,
+) error {
+	// Filter out WSGI targets since they don't support WebSockets
+	var wsTargets []TargetConfig
+	for _, target := range targets {
+		if !strings.Contains(strings.ToLower(target.Name), "wsgi") {
+			wsTargets = append(wsTargets, target)
+		}
+	}
+
+	p := plot.New()
+	p.Title.Text = fmt.Sprintf("%s (Workers: %d)", metricName, subConfig.NumWorkers)
+	p.Y.Label.Text = yLabel
+
+	grid := plotter.NewGrid()
+	grid.Vertical.Color = color.RGBA{R: 220, G: 220, B: 220, A: 255}
+	grid.Horizontal.Color = color.RGBA{R: 220, G: 220, B: 220, A: 255}
+	p.Add(grid)
+
+	numTargets := len(wsTargets)
+	barWidth := vg.Points(12)
+
+	premiumColors := []color.RGBA{
+		{R: 79, G: 70, B: 229, A: 255},  // Indigo
+		{R: 13, G: 148, B: 136, A: 255}, // Teal
+		{R: 219, G: 39, B: 119, A: 255}, // Pink/Rose
+		{R: 217, G: 119, B: 6, A: 255},  // Amber
+	}
+
+	for i, target := range wsTargets {
+		values := make(plotter.Values, len(wsStages))
+		for j, stage := range wsStages {
+			stageName := fmt.Sprintf("WS_%s_req_%s_resp", stage.client, stage.server)
+			config := Config{
+				Target:     target,
+				Duration:   subConfig.Duration,
+				Cooldown:   subConfig.Cooldown,
+				NumWorkers: subConfig.NumWorkers,
+			}
+			stats := wsResults[stageName][config]
+			var val float64
+			switch metricName {
+			case "Average RPS":
+				val = stats.AvgRPS
+			case "Average Latency (ms)":
+				val = float64(stats.AvgLatency.Milliseconds())
+			default:
+				val = 0
+			}
+			values[j] = val
+		}
+
+		bars, err := plotter.NewBarChart(values, barWidth)
+		if err != nil {
+			return err
+		}
+
+		colorIdx := i % len(premiumColors)
+		bars.Color = premiumColors[colorIdx]
+		bars.LineStyle.Color = premiumColors[colorIdx]
+		bars.LineStyle.Width = vg.Points(1)
+
+		offset := (float64(i) - float64(numTargets-1)/2.0) * float64(barWidth)
+		bars.Offset = vg.Points(offset)
+
+		p.Add(bars)
+		p.Legend.Add(target.Name, bars)
+	}
+
+	stageNames := make([]string, len(wsStages))
+	for j, stage := range wsStages {
+		stageNames[j] = fmt.Sprintf("%s/%s", stage.client[:1], stage.server[:1])
+	}
+	p.NominalX(stageNames...)
+
+	plotWidth := vg.Points(float64(len(wsStages)*numTargets*20 + 200))
+	if plotWidth < 450 {
+		plotWidth = 450
+	}
+	plotHeight := vg.Points(350)
+
+	return p.Save(plotWidth, plotHeight, filename)
+}
+
+type ExportedRecord struct {
+	Target   string         `json:"target"`
+	URL      string         `json:"url"`
+	Duration string         `json:"duration"`
+	Cooldown string         `json:"cooldown"`
+	Workers  int            `json:"workers"`
+	Stats    BenchmarkStats `json:"stats"`
+}
+
+type ExportedWSRecord struct {
+	Stage    string         `json:"stage"`
+	Target   string         `json:"target"`
+	URL      string         `json:"url"`
+	Duration string         `json:"duration"`
+	Cooldown string         `json:"cooldown"`
+	Workers  int            `json:"workers"`
+	Stats    BenchmarkStats `json:"stats"`
+}
+
+type ExportedData struct {
+	CRUD      []ExportedRecord   `json:"crud"`
+	Counter   []ExportedRecord   `json:"counter"`
+	WebSocket []ExportedWSRecord `json:"websocket"`
+}
+
+func saveMetricsJSON(filename string, crudResults map[Config]BenchmarkStats, counterResults map[Config]BenchmarkStats, wsResults map[string]map[Config]BenchmarkStats) {
+	var data ExportedData
+
+	for config, stats := range crudResults {
+		data.CRUD = append(data.CRUD, ExportedRecord{
+			Target:   config.Target.Name,
+			URL:      config.Target.URL,
+			Duration: config.Duration.String(),
+			Cooldown: config.Cooldown.String(),
+			Workers:  config.NumWorkers,
+			Stats:    stats,
+		})
+	}
+
+	for config, stats := range counterResults {
+		data.Counter = append(data.Counter, ExportedRecord{
+			Target:   config.Target.Name,
+			URL:      config.Target.URL,
+			Duration: config.Duration.String(),
+			Cooldown: config.Cooldown.String(),
+			Workers:  config.NumWorkers,
+			Stats:    stats,
+		})
+	}
+
+	for stage, configsMap := range wsResults {
+		for config, stats := range configsMap {
+			data.WebSocket = append(data.WebSocket, ExportedWSRecord{
+				Stage:    stage,
+				Target:   config.Target.Name,
+				URL:      config.Target.URL,
+				Duration: config.Duration.String(),
+				Cooldown: config.Cooldown.String(),
+				Workers:  config.NumWorkers,
+				Stats:    stats,
+			})
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		log.Printf("Error marshalling metrics to JSON: %v", err)
+		return
+	}
+
+	err = os.WriteFile(filename, jsonData, 0644)
+	if err != nil {
+		log.Printf("Error writing metrics JSON file: %v", err)
+		return
+	}
+	log.Printf("Saved metrics JSON to: %s", filename)
 }

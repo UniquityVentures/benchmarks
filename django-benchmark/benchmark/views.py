@@ -89,3 +89,8 @@ class CounterView(View):
             return JsonResponse({'counter': int(counter) + 1})
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
+
+from django.http import HttpResponseBadRequest
+
+def websocket_info_view(request):
+    return HttpResponseBadRequest("Please connect via WebSockets.")
