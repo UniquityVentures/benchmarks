@@ -1,10 +1,10 @@
-module lago-benchmark
+module lariv-benchmark
 
 go 1.25.9
 
 require (
-	github.com/lariv-in/lago v0.6.3
-	golang.org/x/net v0.57.0
+	github.com/coder/websocket v1.8.15
+	github.com/lariv-in/lariv v0.6.5
 	maragu.dev/gomponents v1.3.0
 )
 
@@ -27,7 +27,6 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -54,6 +53,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
@@ -66,4 +66,4 @@ require (
 	gorm.io/gorm v1.31.1 // indirect
 )
 
-replace github.com/lariv-in/lago => ../../lago
+replace github.com/lariv-in/lariv => ../../lariv

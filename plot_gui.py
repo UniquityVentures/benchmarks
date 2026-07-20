@@ -7,15 +7,18 @@ from tkinter import ttk
 # Load JSON metrics
 DATA_FILE = "benchmark_metrics.json"
 
+
 class BenchmarkPlotterGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Lamu vs Django Benchmark Plotter (Gnuplot)")
+        self.root.title("Lariv vs Django Benchmark Plotter (Gnuplot)")
         self.root.geometry("900x700")
 
         # Load metrics data
         if not os.path.exists(DATA_FILE):
-            self.show_error(f"Error: {DATA_FILE} not found. Please run the benchmark coordinator first.")
+            self.show_error(
+                f"Error: {DATA_FILE} not found. Please run the benchmark coordinator first."
+            )
             return
 
         try:
@@ -33,28 +36,45 @@ class BenchmarkPlotterGUI:
         self.plot_frame = ttk.LabelFrame(root, text="Plot Preview", padding=10)
         self.plot_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        self.img_label = ttk.Label(self.plot_frame, text="Generate a plot to display preview.")
+        self.img_label = ttk.Label(
+            self.plot_frame, text="Generate a plot to display preview."
+        )
         self.img_label.pack(fill=tk.BOTH, expand=True)
 
         # Dropdowns
-        ttk.Label(control_frame, text="Type:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(control_frame, text="Type:").grid(
+            row=0, column=0, padx=5, pady=5, sticky=tk.W
+        )
         self.type_var = tk.StringVar()
-        self.type_cb = ttk.Combobox(control_frame, textvariable=self.type_var, values=["CRUD", "Counter", "WebSocket"], state="readonly")
+        self.type_cb = ttk.Combobox(
+            control_frame,
+            textvariable=self.type_var,
+            values=["CRUD", "Counter", "WebSocket"],
+            state="readonly",
+        )
         self.type_cb.grid(row=0, column=1, padx=5, pady=5)
         self.type_cb.bind("<<ComboboxSelected>>", self.on_type_change)
 
-        ttk.Label(control_frame, text="Metric:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(control_frame, text="Metric:").grid(
+            row=0, column=2, padx=5, pady=5, sticky=tk.W
+        )
         self.metric_var = tk.StringVar()
-        self.metric_cb = ttk.Combobox(control_frame, textvariable=self.metric_var, state="readonly")
+        self.metric_cb = ttk.Combobox(
+            control_frame, textvariable=self.metric_var, state="readonly"
+        )
         self.metric_cb.grid(row=0, column=3, padx=5, pady=5)
 
         self.workers_label = ttk.Label(control_frame, text="Workers:")
         self.workers_label.grid(row=0, column=4, padx=5, pady=5, sticky=tk.W)
         self.workers_var = tk.StringVar()
-        self.workers_cb = ttk.Combobox(control_frame, textvariable=self.workers_var, state="readonly")
+        self.workers_cb = ttk.Combobox(
+            control_frame, textvariable=self.workers_var, state="readonly"
+        )
         self.workers_cb.grid(row=0, column=5, padx=5, pady=5)
 
-        plot_btn = ttk.Button(control_frame, text="Generate Plot", command=self.generate_plot)
+        plot_btn = ttk.Button(
+            control_frame, text="Generate Plot", command=self.generate_plot
+        )
         plot_btn.grid(row=0, column=6, padx=15, pady=5)
 
         # Initialize dropdown choices
@@ -62,12 +82,22 @@ class BenchmarkPlotterGUI:
         self.on_type_change(None)
 
     def show_error(self, message):
-        err_label = ttk.Label(self.root, text=message, foreground="red", font=("Arial", 14))
+        err_label = ttk.Label(
+            self.root, text=message, foreground="red", font=("Arial", 14)
+        )
         err_label.pack(expand=True)
 
     def on_type_change(self, event):
         btype = self.type_var.get()
-        metrics = ["Average RPS", "Max RPS", "Average Latency (ms)", "Max Latency (ms)", "Max Connections", "Avg Connections", "Total Bytes Received (MB)"]
+        metrics = [
+            "Average RPS",
+            "Max RPS",
+            "Average Latency (ms)",
+            "Max Latency (ms)",
+            "Max Connections",
+            "Avg Connections",
+            "Total Bytes Received (MB)",
+        ]
         self.metric_cb["values"] = metrics
         self.metric_cb.current(0)
 
@@ -99,11 +129,12 @@ class BenchmarkPlotterGUI:
         field_map = {
             "Average RPS": lambda s: s["avg_rps"],
             "Max RPS": lambda s: s["max_rps"],
-            "Average Latency (ms)": lambda s: s["avg_latency"] / 1000000.0, # ns to ms
-            "Max Latency (ms)": lambda s: s["max_latency"] / 1000000.0, # ns to ms
+            "Average Latency (ms)": lambda s: s["avg_latency"] / 1000000.0,  # ns to ms
+            "Max Latency (ms)": lambda s: s["max_latency"] / 1000000.0,  # ns to ms
             "Max Connections": lambda s: s["max_connections"],
             "Avg Connections": lambda s: s["avg_connections"],
-            "Total Bytes Received (MB)": lambda s: s["total_bytes_received"] / (1024.0 * 1024.0)
+            "Total Bytes Received (MB)": lambda s: s["total_bytes_received"]
+            / (1024.0 * 1024.0),
         }
 
         val_func = field_map[metric]
@@ -140,14 +171,22 @@ plot '{data_file}' using 2:xtic(1) notitle linecolor rgb '#4F46E5'
         else:
             # WebSocket: group by target, X-axis is stages
             ws_stages = [
-                ("small", "small"), ("small", "medium"), ("small", "large"),
-                ("medium", "small"), ("medium", "medium"), ("medium", "large"),
-                ("large", "small"), ("large", "medium"), ("large", "large")
+                ("small", "small"),
+                ("small", "medium"),
+                ("small", "large"),
+                ("medium", "small"),
+                ("medium", "medium"),
+                ("medium", "large"),
+                ("large", "small"),
+                ("large", "medium"),
+                ("large", "large"),
             ]
 
             # Find all unique targets
-            targets = sorted(list(set(item["target"] for item in self.data["websocket"])))
-            
+            targets = sorted(
+                list(set(item["target"] for item in self.data["websocket"]))
+            )
+
             # Map of stageName -> targetName -> value
             stage_map = {}
             for item in self.data["websocket"]:
@@ -159,7 +198,9 @@ plot '{data_file}' using 2:xtic(1) notitle linecolor rgb '#4F46E5'
                 stage_map[stage][target] = val
 
             with open(data_file, "w") as f:
-                header = "Stage " + " ".join(t.replace(" ", "_") for t in targets) + "\n"
+                header = (
+                    "Stage " + " ".join(t.replace(" ", "_") for t in targets) + "\n"
+                )
                 f.write(header)
                 for client, server in ws_stages:
                     stage_key = f"WS_{client}_req_{server}_resp"
@@ -174,13 +215,15 @@ plot '{data_file}' using 2:xtic(1) notitle linecolor rgb '#4F46E5'
 
             # Plot columns
             plot_cmds = []
-            colors = ['#4F46E5', '#0D9488', '#DB2777', '#D97706']
+            colors = ["#4F46E5", "#0D9488", "#DB2777", "#D97706"]
             for idx, t in enumerate(targets):
                 col = idx + 2
                 name = t.replace("_", " ")
                 color = colors[idx % len(colors)]
                 xtic = ":xtic(1)" if idx == 0 else ""
-                plot_cmds.append(f"'{data_file}' using {col}{xtic} title '{name}' linecolor rgb '{color}'")
+                plot_cmds.append(
+                    f"'{data_file}' using {col}{xtic} title '{name}' linecolor rgb '{color}'"
+                )
 
             gp_script = f"""
 set terminal pngcairo size 800,500 enhanced font 'Arial,10'
@@ -205,7 +248,9 @@ plot {", ".join(plot_cmds)}
             self.tk_img = tk.PhotoImage(file=png_file)
             self.img_label.config(image=self.tk_img, text="")
         except Exception as e:
-            self.img_label.config(text=f"Failed to generate plot: {e}\nEnsure 'gnuplot' is installed on your system.")
+            self.img_label.config(
+                text=f"Failed to generate plot: {e}\nEnsure 'gnuplot' is installed on your system."
+            )
 
         # Clean up temp files
         for f in [data_file, script_file, png_file]:
@@ -214,6 +259,7 @@ plot {", ".join(plot_cmds)}
                     os.remove(f)
                 except:
                     pass
+
 
 if __name__ == "__main__":
     root = tk.Tk()

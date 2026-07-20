@@ -7,9 +7,14 @@ cooldowns = ["1s"]
 # List of worker counts (number of concurrent goroutines making requests)
 workers = [1, 50, 500]
 
+[[targets]]
+name = "Odoo Local Server"
+url = "http://localhost:8126"
+
+
 # Named target HTTP servers to benchmark
 [[targets]]
-name = "Lamu Local Server"
+name = "Lariv Local Server"
 url = "http://localhost:8123"
 
 [[targets]]

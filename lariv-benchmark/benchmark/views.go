@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/lariv-in/lago"
-	"github.com/lariv-in/lago/components"
-	"github.com/lariv-in/lago/getters"
-	"github.com/lariv-in/lago/registry"
-	"github.com/lariv-in/lago/views"
+	"github.com/lariv-in/lariv"
+	"github.com/lariv-in/lariv/components"
+	"github.com/lariv-in/lariv/getters"
+	"github.com/lariv-in/lariv/registry"
+	"github.com/lariv-in/lariv/views"
 	"maragu.dev/gomponents"
 )
 
@@ -119,8 +119,8 @@ func (l JSONResponseLayer[T]) Next(view views.View, next http.Handler) http.Hand
 	})
 }
 
-func pluginViews() lago.PluginFeatures[*views.View] {
-	return lago.PluginFeatures[*views.View]{
+func pluginViews() lariv.PluginFeatures[*views.View] {
+	return lariv.PluginFeatures[*views.View]{
 		Entries: []registry.Pair[string, *views.View]{
 			{
 				Key: "benchmark.ListRouteView",

@@ -4,52 +4,52 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/lariv-in/lago"
-	"github.com/lariv-in/lago/getters"
-	"github.com/lariv-in/lago/registry"
+	"github.com/lariv-in/lariv"
+	"github.com/lariv-in/lariv/getters"
+	"github.com/lariv-in/lariv/registry"
 )
 
-func pluginRoutes() lago.PluginFeatures[lago.Route] {
-	return lago.PluginFeatures[lago.Route]{
-		Entries: []registry.Pair[string, lago.Route]{
+func pluginRoutes() lariv.PluginFeatures[lariv.Route] {
+	return lariv.PluginFeatures[lariv.Route]{
+		Entries: []registry.Pair[string, lariv.Route]{
 			{
 				Key: "benchmark.ListRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path:    "GET /api/articles/",
-					Handler: lago.NewDynamicView("benchmark.ListRouteView"),
+					Handler: lariv.NewDynamicView("benchmark.ListRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.CreateRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path:    "POST /api/articles/",
-					Handler: lago.NewDynamicView("benchmark.CreateRouteView"),
+					Handler: lariv.NewDynamicView("benchmark.CreateRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.DetailRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path:    "GET /api/articles/{id}/",
-					Handler: lago.NewDynamicView("benchmark.DetailRouteView"),
+					Handler: lariv.NewDynamicView("benchmark.DetailRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.UpdateRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path:    "PUT /api/articles/{id}/",
-					Handler: lago.NewDynamicView("benchmark.UpdateRouteView"),
+					Handler: lariv.NewDynamicView("benchmark.UpdateRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.DeleteRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path:    "DELETE /api/articles/{id}/",
-					Handler: lago.NewDynamicView("benchmark.DeleteRouteView"),
+					Handler: lariv.NewDynamicView("benchmark.DeleteRouteView"),
 				},
 			},
 			{
 				Key: "benchmark.TruncateRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path: "POST /api/truncate/",
 					Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						db, err := getters.DBFromContext(r.Context())
@@ -67,7 +67,7 @@ func pluginRoutes() lago.PluginFeatures[lago.Route] {
 			},
 			{
 				Key: "benchmark.CounterRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path: "POST /api/counter/",
 					Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						var req struct {
@@ -88,7 +88,7 @@ func pluginRoutes() lago.PluginFeatures[lago.Route] {
 			},
 			{
 				Key: "benchmark.WebsocketRoute",
-				Value: lago.Route{
+				Value: lariv.Route{
 					Path:    "GET /api/ws/",
 					Handler: http.HandlerFunc(BenchmarkWSHandler),
 				},
@@ -96,4 +96,3 @@ func pluginRoutes() lago.PluginFeatures[lago.Route] {
 		},
 	}
 }
-

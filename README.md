@@ -1,6 +1,6 @@
 # Benchmarking setup
 
-This repo contains the benchmarking setup for comparing lamu and django.
+This repo contains the benchmarking setup for comparing lariv and django.
 
 
 ## Testing methodology

@@ -3,8 +3,8 @@ package benchmark
 import (
 	"time"
 
-	"github.com/lariv-in/lago"
-	"github.com/lariv-in/lago/registry"
+	"github.com/lariv-in/lariv"
+	"github.com/lariv-in/lariv/registry"
 )
 
 type Article struct {
@@ -15,8 +15,8 @@ type Article struct {
 	UpdatedAt time.Time `gorm:"not null" json:"updated_at"`
 }
 
-func pluginModels() lago.PluginFeatures[any] {
-	return lago.PluginFeatures[any]{
+func pluginModels() lariv.PluginFeatures[any] {
+	return lariv.PluginFeatures[any]{
 		Entries: []registry.Pair[string, any]{
 			{Key: "benchmark.Article", Value: Article{}},
 		},
