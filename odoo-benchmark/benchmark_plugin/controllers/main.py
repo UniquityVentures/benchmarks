@@ -67,7 +67,13 @@ def serialize_article(article):
     }
 
 
+class BenchmarkWebsocket(Websocket):
+    def _limit_rate(self):
+        pass
+
+
 class BenchmarkController(http.Controller):
+
 
     @http.route(['/api/counter', '/api/counter/'], type='http', auth='none', methods=['POST'], csrf=False, cors='*')
     def counter(self, **kwargs):
@@ -174,7 +180,7 @@ class BenchmarkController(http.Controller):
         httprequest = request.httprequest
 
         def handle_ws():
-            ws = Websocket(sock, session, httprequest.cookies)
+            ws = BenchmarkWebsocket(sock, session, httprequest.cookies)
             try:
                 for message in ws.get_messages():
                     if message == b'\x00':
