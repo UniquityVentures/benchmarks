@@ -80,7 +80,7 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "lamu_benchmark",
+        "NAME": "lariv_benchmark",
         "USER": "postgres",
         "HOST": "/run/postgresql",
         "PORT": "5432",

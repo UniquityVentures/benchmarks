@@ -7,11 +7,6 @@ cooldowns = ["1s"]
 # List of worker counts (number of concurrent goroutines making requests)
 workers = [1, 50, 500]
 
-[[targets]]
-name = "Odoo Local Server"
-url = "http://localhost:8126"
-
-
 # Named target HTTP servers to benchmark
 [[targets]]
 name = "Lariv Local Server"
@@ -24,3 +19,7 @@ url = "http://localhost:8124"
 [[targets]]
 name = "Django Local Server WSGI"
 url = "http://localhost:8125"
+
+[[targets]]
+name = "Odoo Local Server"
+url = "http://localhost:8126"
