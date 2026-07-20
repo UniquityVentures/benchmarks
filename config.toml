@@ -6,7 +6,6 @@ cooldowns = ["1s"]
 
 # List of worker counts (number of concurrent goroutines making requests)
 workers = [1, 50, 500]
-
 # Named target HTTP servers to benchmark
 [[targets]]
 name = "Lariv Local Server"
@@ -23,3 +22,9 @@ url = "http://localhost:8125"
 [[targets]]
 name = "Odoo Local Server"
 url = "http://localhost:8126"
+
+
+[[targets]]
+name = "Frappe Local Server"
+url = "http://localhost:8127"
+

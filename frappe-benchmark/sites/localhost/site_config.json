@@ -1,0 +1,12 @@
+{
+ "db_host": "127.0.0.1",
+ "db_name": "frappe_benchmark",
+ "db_password": "Pass1234",
+ "db_port": 3306,
+ "db_type": "mariadb",
+ "db_user": "root",
+ "installed_apps": [
+  "frappe",
+  "benchmark_app"
+ ]
+}
