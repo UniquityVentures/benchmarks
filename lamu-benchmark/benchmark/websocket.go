@@ -3,7 +3,10 @@ package benchmark
 import (
 	"encoding/json"
 	"fmt"
-	"golang.org/x/net/websocket"
+	"net/http"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 type WSSmallResponse struct {
@@ -111,22 +114,35 @@ func init() {
 	}
 }
 
-func BenchmarkWSHandler(ws *websocket.Conn) {
+func BenchmarkWSHandler(w http.ResponseWriter, r *http.Request) {
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return
+	}
+	defer c.Close(websocket.StatusInternalError, "closing")
+
+	// Disable read limit to allow handling large request payloads (> 32KB)
+	c.SetReadLimit(-1)
+
+	ctx := r.Context()
 	for {
 		var req WSRequest
-		if err := websocket.JSON.Receive(ws, &req); err != nil {
+		if err := wsjson.Read(ctx, c, &req); err != nil {
 			break
 		}
 		var err error
 		if req.Query == "medium" {
-			err = websocket.JSON.Send(ws, mediumResponse)
+			err = wsjson.Write(ctx, c, mediumResponse)
 		} else if req.Query == "large" {
-			err = websocket.JSON.Send(ws, largeResponse)
+			err = wsjson.Write(ctx, c, largeResponse)
 		} else {
-			err = websocket.JSON.Send(ws, smallResponse)
+			err = wsjson.Write(ctx, c, smallResponse)
 		}
 		if err != nil {
 			break
 		}
 	}
 }
+

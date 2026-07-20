@@ -308,7 +308,22 @@ func loadConfig(path string) ([]TargetConfig, []time.Duration, []time.Duration, 
 
 func main() {
 	configPath := flag.String("config", "config.toml", "Path to the TOML configuration file")
+	wsFlag := flag.Bool("ws", false, "Run the websocket benchmarks")
+	crudFlag := flag.Bool("crud", false, "Run the crud benchmarks")
+	counterFlag := flag.Bool("counter", false, "Run the counter benchmarks")
+	allFlag := flag.Bool("all", false, "Run all benchmarks")
 	flag.Parse()
+
+	runCRUD := *allFlag || *crudFlag
+	runCounter := *allFlag || *counterFlag
+	runWS := *allFlag || *wsFlag
+
+	// If no flags are provided, run all by default (legacy behavior)
+	if !*allFlag && !*crudFlag && !*counterFlag && !*wsFlag {
+		runCRUD = true
+		runCounter = true
+		runWS = true
+	}
 
 	log.Println("Starting Go Benchmarking Utility")
 	log.Printf("Loading configuration from: %s", *configPath)
@@ -343,69 +358,73 @@ func main() {
 	}
 
 	// Permutation loop for CRUD
-	for _, target := range targets {
-		for _, sub := range subConfigs {
-			config := Config{
-				Target:     target,
-				Duration:   sub.Duration,
-				Cooldown:   sub.Cooldown,
-				NumWorkers: sub.NumWorkers,
-			}
+	if runCRUD {
+		for _, target := range targets {
+			for _, sub := range subConfigs {
+				config := Config{
+					Target:     target,
+					Duration:   sub.Duration,
+					Cooldown:   sub.Cooldown,
+					NumWorkers: sub.NumWorkers,
+				}
 
-			log.Printf("================================================================================")
-			log.Printf("STARTING CRUD BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
-				config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
+				log.Printf("================================================================================")
+				log.Printf("STARTING CRUD BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+					config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
 
-			stats := runBenchmark(config)
-			results[config] = stats
+				stats := runBenchmark(config)
+				results[config] = stats
 
-			log.Printf("CRUD BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
-				stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
+				log.Printf("CRUD BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+					stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
 
-			// Cooldown logic with DB truncation
-			log.Printf("Sleeping for 1 second before database truncation...")
-			time.Sleep(1 * time.Second)
+				// Cooldown logic with DB truncation
+				log.Printf("Sleeping for 1 second before database truncation...")
+				time.Sleep(1 * time.Second)
 
-			truncateURL := config.Target.URL + "/api/truncate/"
-			log.Printf("Truncating database via endpoint: %s", truncateURL)
-			if err := sendTruncateRequest(truncateURL); err != nil {
-				log.Printf("Warning: failed to truncate database: %v", err)
-			} else {
-				log.Println("Database truncated successfully.")
-			}
+				truncateURL := config.Target.URL + "/api/truncate/"
+				log.Printf("Truncating database via endpoint: %s", truncateURL)
+				if err := sendTruncateRequest(truncateURL); err != nil {
+					log.Printf("Warning: failed to truncate database: %v", err)
+				} else {
+					log.Println("Database truncated successfully.")
+				}
 
-			remainingCooldown := config.Cooldown - 1*time.Second
-			if remainingCooldown > 0 {
-				log.Printf("Sleeping for remaining cooldown: %s", remainingCooldown)
-				time.Sleep(remainingCooldown)
+				remainingCooldown := config.Cooldown - 1*time.Second
+				if remainingCooldown > 0 {
+					log.Printf("Sleeping for remaining cooldown: %s", remainingCooldown)
+					time.Sleep(remainingCooldown)
+				}
 			}
 		}
 	}
 
 	// Permutation loop for Counter
 	counterResults := make(map[Config]BenchmarkStats)
-	for _, target := range targets {
-		for _, sub := range subConfigs {
-			config := Config{
-				Target:     target,
-				Duration:   sub.Duration,
-				Cooldown:   sub.Cooldown,
-				NumWorkers: sub.NumWorkers,
-			}
+	if runCounter {
+		for _, target := range targets {
+			for _, sub := range subConfigs {
+				config := Config{
+					Target:     target,
+					Duration:   sub.Duration,
+					Cooldown:   sub.Cooldown,
+					NumWorkers: sub.NumWorkers,
+				}
 
-			log.Printf("================================================================================")
-			log.Printf("STARTING COUNTER BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
-				config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
+				log.Printf("================================================================================")
+				log.Printf("STARTING COUNTER BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+					config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
 
-			stats := runCounterBenchmark(config)
-			counterResults[config] = stats
+				stats := runCounterBenchmark(config)
+				counterResults[config] = stats
 
-			log.Printf("COUNTER BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
-				stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
+				log.Printf("COUNTER BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+					stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
 
-			if config.Cooldown > 0 {
-				log.Printf("Sleeping for cooldown: %s", config.Cooldown)
-				time.Sleep(config.Cooldown)
+				if config.Cooldown > 0 {
+					log.Printf("Sleeping for cooldown: %s", config.Cooldown)
+					time.Sleep(config.Cooldown)
+				}
 			}
 		}
 	}
@@ -427,35 +446,37 @@ func main() {
 		{"large", "large"},
 	}
 
-	for _, stage := range wsStages {
-		stageName := fmt.Sprintf("WS_%s_req_%s_resp", stage.client, stage.server)
-		wsResults[stageName] = make(map[Config]BenchmarkStats)
-		for _, target := range targets {
-			// Skip WSGI targets as WSGI fundamentally does not support WebSockets
-			if strings.Contains(strings.ToLower(target.Name), "wsgi") {
-				continue
-			}
-			for _, sub := range subConfigs {
-				config := Config{
-					Target:     target,
-					Duration:   sub.Duration,
-					Cooldown:   sub.Cooldown,
-					NumWorkers: sub.NumWorkers,
+	if runWS {
+		for _, stage := range wsStages {
+			stageName := fmt.Sprintf("WS_%s_req_%s_resp", stage.client, stage.server)
+			wsResults[stageName] = make(map[Config]BenchmarkStats)
+			for _, target := range targets {
+				// Skip WSGI targets as WSGI fundamentally does not support WebSockets
+				if strings.Contains(strings.ToLower(target.Name), "wsgi") {
+					continue
 				}
+				for _, sub := range subConfigs {
+					config := Config{
+						Target:     target,
+						Duration:   sub.Duration,
+						Cooldown:   sub.Cooldown,
+						NumWorkers: sub.NumWorkers,
+					}
 
-				log.Printf("================================================================================")
-				log.Printf("STARTING WEBSOCKET BENCHMARK (%s): Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
-					stageName, config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
+					log.Printf("================================================================================")
+					log.Printf("STARTING WEBSOCKET BENCHMARK (%s): Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+						stageName, config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
 
-				stats := runWebsocketBenchmark(config, stage.client, stage.server)
-				wsResults[stageName][config] = stats
+					stats := runWebsocketBenchmark(config, stage.client, stage.server)
+					wsResults[stageName][config] = stats
 
-				log.Printf("WEBSOCKET BENCHMARK (%s) FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
-					stageName, stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
+					log.Printf("WEBSOCKET BENCHMARK (%s) FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+						stageName, stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
 
-				if config.Cooldown > 0 {
-					log.Printf("Sleeping for cooldown: %s", config.Cooldown)
-					time.Sleep(config.Cooldown)
+					if config.Cooldown > 0 {
+						log.Printf("Sleeping for cooldown: %s", config.Cooldown)
+						time.Sleep(config.Cooldown)
+					}
 				}
 			}
 		}
@@ -463,74 +484,80 @@ func main() {
 
 	// Plot results
 	log.Println("================================================================================")
-	log.Println("Generating SVG Plots for CRUD...")
-	metricsToPlot := []struct {
-		name   string
-		yLabel string
-		file   string
-	}{
-		{"Average RPS", "Requests Per Second", "average_rps.svg"},
-		{"Max RPS", "Requests Per Second", "max_rps.svg"},
-		{"Average Latency (ms)", "Latency (ms)", "average_latency.svg"},
-		{"Max Latency (ms)", "Latency (ms)", "max_latency.svg"},
-		{"Average Connections", "TCP Connections", "average_connections.svg"},
-		{"Max Connections", "TCP Connections", "max_connections.svg"},
-		{"Total Bytes Received (MB)", "Data Received (MB)", "total_bytes_received.svg"},
-		{"Average Bytes Received (KB)", "Data Received (KB)", "average_bytes_received.svg"},
-	}
-
-	for _, m := range metricsToPlot {
-		if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, results); err != nil {
-			log.Fatalf("Error plotting %q: %v", m.name, err)
-		}
-		log.Printf("Saved plot: %s", m.file)
-	}
-
-	log.Println("Generating SVG Plots for Counter...")
-	counterMetricsToPlot := []struct {
-		name   string
-		yLabel string
-		file   string
-	}{
-		{"Average RPS", "Requests Per Second", "counter_average_rps.svg"},
-		{"Max RPS", "Requests Per Second", "counter_max_rps.svg"},
-		{"Average Latency (ms)", "Latency (ms)", "counter_average_latency.svg"},
-		{"Max Latency (ms)", "Latency (ms)", "counter_max_latency.svg"},
-		{"Average Connections", "TCP Connections", "counter_average_connections.svg"},
-		{"Max Connections", "TCP Connections", "counter_max_connections.svg"},
-		{"Total Bytes Received (MB)", "Data Received (MB)", "counter_total_bytes_received.svg"},
-		{"Average Bytes Received (KB)", "Data Received (KB)", "counter_average_bytes_received.svg"},
-	}
-
-	for _, m := range counterMetricsToPlot {
-		if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, counterResults); err != nil {
-			log.Fatalf("Error plotting %q: %v", m.name, err)
-		}
-		log.Printf("Saved plot: %s", m.file)
-	}
-
-	// Generate WS plots for each worker count configuration
-	log.Println("Generating SVG Plots for WebSockets...")
-	for _, subConfig := range subConfigs {
-		// Only plot one duration configuration to avoid duplicate charts
-		if len(durations) > 0 && subConfig.Duration != durations[0] {
-			continue
+	if runCRUD {
+		log.Println("Generating SVG Plots for CRUD...")
+		metricsToPlot := []struct {
+			name   string
+			yLabel string
+			file   string
+		}{
+			{"Average RPS", "Requests Per Second", "average_rps.svg"},
+			{"Max RPS", "Requests Per Second", "max_rps.svg"},
+			{"Average Latency (ms)", "Latency (ms)", "average_latency.svg"},
+			{"Max Latency (ms)", "Latency (ms)", "max_latency.svg"},
+			{"Average Connections", "TCP Connections", "average_connections.svg"},
+			{"Max Connections", "TCP Connections", "max_connections.svg"},
+			{"Total Bytes Received (MB)", "Data Received (MB)", "total_bytes_received.svg"},
+			{"Average Bytes Received (KB)", "Data Received (KB)", "average_bytes_received.svg"},
 		}
 
-		rpsFile := fmt.Sprintf("websocket_average_rps_w%d.svg", subConfig.NumWorkers)
-		if err := plotWSMetric("Average RPS", "Requests Per Second", rpsFile, targets, subConfig, wsStages, wsResults); err != nil {
-			log.Fatalf("Error plotting WS RPS: %v", err)
+		for _, m := range metricsToPlot {
+			if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, results); err != nil {
+				log.Fatalf("Error plotting %q: %v", m.name, err)
+			}
+			log.Printf("Saved plot: %s", m.file)
 		}
-		log.Printf("Saved plot: %s", rpsFile)
-
-		latFile := fmt.Sprintf("websocket_average_latency_w%d.svg", subConfig.NumWorkers)
-		if err := plotWSMetric("Average Latency (ms)", "Latency (ms)", latFile, targets, subConfig, wsStages, wsResults); err != nil {
-			log.Fatalf("Error plotting WS Latency: %v", err)
-		}
-		log.Printf("Saved plot: %s", latFile)
 	}
 
-	log.Println("All benchmarks completed successfully and plots generated.")
+	if runCounter {
+		log.Println("Generating SVG Plots for Counter...")
+		counterMetricsToPlot := []struct {
+			name   string
+			yLabel string
+			file   string
+		}{
+			{"Average RPS", "Requests Per Second", "counter_average_rps.svg"},
+			{"Max RPS", "Requests Per Second", "counter_max_rps.svg"},
+			{"Average Latency (ms)", "Latency (ms)", "counter_average_latency.svg"},
+			{"Max Latency (ms)", "Latency (ms)", "counter_max_latency.svg"},
+			{"Average Connections", "TCP Connections", "counter_average_connections.svg"},
+			{"Max Connections", "TCP Connections", "counter_max_connections.svg"},
+			{"Total Bytes Received (MB)", "Data Received (MB)", "counter_total_bytes_received.svg"},
+			{"Average Bytes Received (KB)", "Data Received (KB)", "counter_average_bytes_received.svg"},
+		}
+
+		for _, m := range counterMetricsToPlot {
+			if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, counterResults); err != nil {
+				log.Fatalf("Error plotting %q: %v", m.name, err)
+			}
+			log.Printf("Saved plot: %s", m.file)
+		}
+	}
+
+	if runWS {
+		// Generate WS plots for each worker count configuration
+		log.Println("Generating SVG Plots for WebSockets...")
+		for _, subConfig := range subConfigs {
+			// Only plot one duration configuration to avoid duplicate charts
+			if len(durations) > 0 && subConfig.Duration != durations[0] {
+				continue
+			}
+
+			rpsFile := fmt.Sprintf("websocket_average_rps_w%d.svg", subConfig.NumWorkers)
+			if err := plotWSMetric("Average RPS", "Requests Per Second", rpsFile, targets, subConfig, wsStages, wsResults); err != nil {
+				log.Fatalf("Error plotting WS RPS: %v", err)
+			}
+			log.Printf("Saved plot: %s", rpsFile)
+
+			latFile := fmt.Sprintf("websocket_average_latency_w%d.svg", subConfig.NumWorkers)
+			if err := plotWSMetric("Average Latency (ms)", "Latency (ms)", latFile, targets, subConfig, wsStages, wsResults); err != nil {
+				log.Fatalf("Error plotting WS Latency: %v", err)
+			}
+			log.Printf("Saved plot: %s", latFile)
+		}
+	}
+
+	log.Println("Benchmarks completed successfully and plots generated.")
 	saveMetricsJSON("benchmark_metrics.json", results, counterResults, wsResults)
 }
 
@@ -1488,40 +1515,109 @@ type ExportedData struct {
 func saveMetricsJSON(filename string, crudResults map[Config]BenchmarkStats, counterResults map[Config]BenchmarkStats, wsResults map[string]map[Config]BenchmarkStats) {
 	var data ExportedData
 
-	for config, stats := range crudResults {
-		data.CRUD = append(data.CRUD, ExportedRecord{
-			Target:   config.Target.Name,
-			URL:      config.Target.URL,
-			Duration: config.Duration.String(),
-			Cooldown: config.Cooldown.String(),
-			Workers:  config.NumWorkers,
-			Stats:    stats,
-		})
+	// Read existing file if it exists, to preserve skipped benchmarks' metrics
+	if existingBytes, err := os.ReadFile(filename); err == nil {
+		if err := json.Unmarshal(existingBytes, &data); err != nil {
+			log.Printf("Warning: failed to parse existing metrics JSON: %v", err)
+		}
 	}
 
-	for config, stats := range counterResults {
-		data.Counter = append(data.Counter, ExportedRecord{
-			Target:   config.Target.Name,
-			URL:      config.Target.URL,
-			Duration: config.Duration.String(),
-			Cooldown: config.Cooldown.String(),
-			Workers:  config.NumWorkers,
-			Stats:    stats,
-		})
+	type recordKey struct {
+		Target   string
+		Workers  int
+		Duration string
+		Cooldown string
 	}
 
-	for stage, configsMap := range wsResults {
-		for config, stats := range configsMap {
-			data.WebSocket = append(data.WebSocket, ExportedWSRecord{
-				Stage:    stage,
+	// Helper to update CRUD/Counter records
+	updateRecords := func(existing []ExportedRecord, newResults map[Config]BenchmarkStats) []ExportedRecord {
+		recordMap := make(map[recordKey]ExportedRecord)
+		var order []recordKey
+
+		for _, rec := range existing {
+			k := recordKey{rec.Target, rec.Workers, rec.Duration, rec.Cooldown}
+			recordMap[k] = rec
+			order = append(order, k)
+		}
+
+		for config, stats := range newResults {
+			k := recordKey{config.Target.Name, config.NumWorkers, config.Duration.String(), config.Cooldown.String()}
+			rec := ExportedRecord{
 				Target:   config.Target.Name,
 				URL:      config.Target.URL,
 				Duration: config.Duration.String(),
 				Cooldown: config.Cooldown.String(),
 				Workers:  config.NumWorkers,
 				Stats:    stats,
-			})
+			}
+			if _, exists := recordMap[k]; !exists {
+				order = append(order, k)
+			}
+			recordMap[k] = rec
 		}
+
+		var updated []ExportedRecord
+		for _, k := range order {
+			updated = append(updated, recordMap[k])
+		}
+		return updated
+	}
+
+	// Helper to update WebSocket records
+	updateWSRecords := func(existing []ExportedWSRecord, newResults map[string]map[Config]BenchmarkStats) []ExportedWSRecord {
+		type wsKey struct {
+			Stage    string
+			Target   string
+			Workers  int
+			Duration string
+			Cooldown string
+		}
+
+		recordMap := make(map[wsKey]ExportedWSRecord)
+		var order []wsKey
+
+		for _, rec := range existing {
+			k := wsKey{rec.Stage, rec.Target, rec.Workers, rec.Duration, rec.Cooldown}
+			recordMap[k] = rec
+			order = append(order, k)
+		}
+
+		for stage, configsMap := range newResults {
+			for config, stats := range configsMap {
+				k := wsKey{stage, config.Target.Name, config.NumWorkers, config.Duration.String(), config.Cooldown.String()}
+				rec := ExportedWSRecord{
+					Stage:    stage,
+					Target:   config.Target.Name,
+					URL:      config.Target.URL,
+					Duration: config.Duration.String(),
+					Cooldown: config.Cooldown.String(),
+					Workers:  config.NumWorkers,
+					Stats:    stats,
+				}
+				if _, exists := recordMap[k]; !exists {
+					order = append(order, k)
+				}
+				recordMap[k] = rec
+			}
+		}
+
+		var updated []ExportedWSRecord
+		for _, k := range order {
+			updated = append(updated, recordMap[k])
+		}
+		return updated
+	}
+
+	if len(crudResults) > 0 {
+		data.CRUD = updateRecords(data.CRUD, crudResults)
+	}
+
+	if len(counterResults) > 0 {
+		data.Counter = updateRecords(data.Counter, counterResults)
+	}
+
+	if len(wsResults) > 0 {
+		data.WebSocket = updateWSRecords(data.WebSocket, wsResults)
 	}
 
 	jsonData, err := json.MarshalIndent(data, "", "  ")

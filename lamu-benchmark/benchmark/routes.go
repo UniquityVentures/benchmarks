@@ -7,7 +7,6 @@ import (
 	"github.com/lariv-in/lago"
 	"github.com/lariv-in/lago/getters"
 	"github.com/lariv-in/lago/registry"
-	"golang.org/x/net/websocket"
 )
 
 func pluginRoutes() lago.PluginFeatures[lago.Route] {
@@ -91,9 +90,10 @@ func pluginRoutes() lago.PluginFeatures[lago.Route] {
 				Key: "benchmark.WebsocketRoute",
 				Value: lago.Route{
 					Path:    "GET /api/ws/",
-					Handler: websocket.Handler(BenchmarkWSHandler),
+					Handler: http.HandlerFunc(BenchmarkWSHandler),
 				},
 			},
 		},
 	}
 }
+

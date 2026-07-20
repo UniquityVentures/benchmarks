@@ -1,5 +1,5 @@
 # List of durations to run the benchmark for (each duration will run sequentially)
-durations = ["60s"]
+durations = ["10s"]
 
 # Cooldown sleep durations between benchmark runs
 cooldowns = ["1s"]
