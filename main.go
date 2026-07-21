@@ -130,18 +130,42 @@ func init() {
 	}
 }
 
-// TargetConfig represents a benchmark target with a Name and URL.
+type RawTargetConfig struct {
+	Name       string   `toml:"name"`
+	URL        string   `toml:"url"`
+	Benchmarks []string `toml:"benchmarks"`
+}
+
+// TargetConfig represents a benchmark target with a Name, URL, and allowed Benchmarks.
 type TargetConfig struct {
-	Name string `toml:"name"`
-	URL  string `toml:"url"`
+	Name           string
+	URL            string
+	benchmarksMask string
+}
+
+func (t TargetConfig) SupportsBenchmark(b string) bool {
+	if t.benchmarksMask == "" {
+		return true
+	}
+	bLower := "," + strings.ToLower(strings.TrimSpace(b)) + ","
+	if strings.Contains(t.benchmarksMask, bLower) {
+		return true
+	}
+	if bLower == ",websocket," && strings.Contains(t.benchmarksMask, ",ws,") {
+		return true
+	}
+	if bLower == ",ws," && strings.Contains(t.benchmarksMask, ",websocket,") {
+		return true
+	}
+	return false
 }
 
 // TomlConfig represents the structure of the config.toml file.
 type TomlConfig struct {
-	Targets   []TargetConfig `toml:"targets"`
-	Durations []string       `toml:"durations"`
-	Cooldowns []string       `toml:"cooldowns"`
-	Workers   []int          `toml:"workers"`
+	Targets   []RawTargetConfig `toml:"targets"`
+	Durations []string          `toml:"durations"`
+	Cooldowns []string          `toml:"cooldowns"`
+	Workers   []int             `toml:"workers"`
 }
 
 // Config represents a benchmarking configuration permutation.
@@ -264,8 +288,21 @@ func loadConfig(path string) ([]TargetConfig, []time.Duration, []time.Duration, 
 		return nil, nil, nil, nil, fmt.Errorf("failed to decode TOML file: %w", err)
 	}
 
-	if len(tomlConf.Targets) == 0 {
-		return nil, nil, nil, nil, fmt.Errorf("no targets specified in configuration")
+	var parsedTargets []TargetConfig
+	for _, raw := range tomlConf.Targets {
+		mask := ""
+		if len(raw.Benchmarks) > 0 {
+			var items []string
+			for _, b := range raw.Benchmarks {
+				items = append(items, strings.ToLower(strings.TrimSpace(b)))
+			}
+			mask = "," + strings.Join(items, ",") + ","
+		}
+		parsedTargets = append(parsedTargets, TargetConfig{
+			Name:           raw.Name,
+			URL:            raw.URL,
+			benchmarksMask: mask,
+		})
 	}
 
 	var parsedDurations []time.Duration
@@ -303,7 +340,7 @@ func loadConfig(path string) ([]TargetConfig, []time.Duration, []time.Duration, 
 		parsedWorkers = []int{10}
 	}
 
-	return tomlConf.Targets, parsedDurations, parsedCooldowns, parsedWorkers, nil
+	return parsedTargets, parsedDurations, parsedCooldowns, parsedWorkers, nil
 }
 
 func main() {
@@ -311,18 +348,21 @@ func main() {
 	wsFlag := flag.Bool("ws", false, "Run the websocket benchmarks")
 	crudFlag := flag.Bool("crud", false, "Run the crud benchmarks")
 	counterFlag := flag.Bool("counter", false, "Run the counter benchmarks")
+	taskFlag := flag.Bool("task", false, "Run the background task benchmarks")
 	allFlag := flag.Bool("all", false, "Run all benchmarks")
 	flag.Parse()
 
 	runCRUD := *allFlag || *crudFlag
 	runCounter := *allFlag || *counterFlag
 	runWS := *allFlag || *wsFlag
+	runTask := *allFlag || *taskFlag
 
 	// If no flags are provided, run all by default (legacy behavior)
-	if !*allFlag && !*crudFlag && !*counterFlag && !*wsFlag {
+	if !*allFlag && !*crudFlag && !*counterFlag && !*wsFlag && !*taskFlag {
 		runCRUD = true
 		runCounter = true
 		runWS = true
+		runTask = true
 	}
 
 	log.Println("Starting Go Benchmarking Utility")
@@ -360,6 +400,9 @@ func main() {
 	// Permutation loop for CRUD
 	if runCRUD {
 		for _, target := range targets {
+			if !target.SupportsBenchmark("crud") {
+				continue
+			}
 			for _, sub := range subConfigs {
 				config := Config{
 					Target:     target,
@@ -403,6 +446,9 @@ func main() {
 	counterResults := make(map[Config]BenchmarkStats)
 	if runCounter {
 		for _, target := range targets {
+			if !target.SupportsBenchmark("counter") {
+				continue
+			}
 			for _, sub := range subConfigs {
 				config := Config{
 					Target:     target,
@@ -419,6 +465,39 @@ func main() {
 				counterResults[config] = stats
 
 				log.Printf("COUNTER BENCHMARK FINISHED. Requests: %d | Avg RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+					stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
+
+				if config.Cooldown > 0 {
+					log.Printf("Sleeping for cooldown: %s", config.Cooldown)
+					time.Sleep(config.Cooldown)
+				}
+			}
+		}
+	}
+
+	// Permutation loop for Task
+	taskResults := make(map[Config]BenchmarkStats)
+	if runTask {
+		for _, target := range targets {
+			if !target.SupportsBenchmark("task") {
+				continue
+			}
+			for _, sub := range subConfigs {
+				config := Config{
+					Target:     target,
+					Duration:   sub.Duration,
+					Cooldown:   sub.Cooldown,
+					NumWorkers: sub.NumWorkers,
+				}
+
+				log.Printf("================================================================================")
+				log.Printf("STARTING TASK BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+					config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
+
+				stats := runTaskBenchmark(config)
+				taskResults[config] = stats
+
+				log.Printf("TASK BENCHMARK FINISHED. Tasks Completed: %d | Increments / RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
 					stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
 
 				if config.Cooldown > 0 {
@@ -451,6 +530,9 @@ func main() {
 			stageName := fmt.Sprintf("WS_%s_req_%s_resp", stage.client, stage.server)
 			wsResults[stageName] = make(map[Config]BenchmarkStats)
 			for _, target := range targets {
+				if !target.SupportsBenchmark("websocket") {
+					continue
+				}
 				// Skip WSGI targets as WSGI fundamentally does not support WebSockets
 				if strings.Contains(strings.ToLower(target.Name), "wsgi") {
 					continue
@@ -501,8 +583,9 @@ func main() {
 			{"Average Bytes Received (KB)", "Data Received (KB)", "average_bytes_received.svg"},
 		}
 
+		crudTargets := filterTargetsForBenchmark(targets, "crud")
 		for _, m := range metricsToPlot {
-			if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, results); err != nil {
+			if err := plotMetric(m.name, m.yLabel, m.file, crudTargets, subConfigs, results); err != nil {
 				log.Fatalf("Error plotting %q: %v", m.name, err)
 			}
 			log.Printf("Saved plot: %s", m.file)
@@ -526,8 +609,35 @@ func main() {
 			{"Average Bytes Received (KB)", "Data Received (KB)", "counter_average_bytes_received.svg"},
 		}
 
+		counterTargets := filterTargetsForBenchmark(targets, "counter")
 		for _, m := range counterMetricsToPlot {
-			if err := plotMetric(m.name, m.yLabel, m.file, targets, subConfigs, counterResults); err != nil {
+			if err := plotMetric(m.name, m.yLabel, m.file, counterTargets, subConfigs, counterResults); err != nil {
+				log.Fatalf("Error plotting %q: %v", m.name, err)
+			}
+			log.Printf("Saved plot: %s", m.file)
+		}
+	}
+
+	if runTask {
+		log.Println("Generating SVG Plots for Task Benchmark...")
+		taskMetricsToPlot := []struct {
+			name   string
+			yLabel string
+			file   string
+		}{
+			{"Average RPS", "Increments / RPS", "task_average_rps.svg"},
+			{"Max RPS", "Increments / RPS", "task_max_rps.svg"},
+			{"Average Latency (ms)", "Latency (ms)", "task_average_latency.svg"},
+			{"Max Latency (ms)", "Latency (ms)", "task_max_latency.svg"},
+			{"Average Connections", "TCP Connections", "task_average_connections.svg"},
+			{"Max Connections", "TCP Connections", "task_max_connections.svg"},
+			{"Total Bytes Received (MB)", "Data Received (MB)", "task_total_bytes_received.svg"},
+			{"Average Bytes Received (KB)", "Data Received (KB)", "task_average_bytes_received.svg"},
+		}
+
+		taskTargets := filterTargetsForBenchmark(targets, "task")
+		for _, m := range taskMetricsToPlot {
+			if err := plotMetric(m.name, m.yLabel, m.file, taskTargets, subConfigs, taskResults); err != nil {
 				log.Fatalf("Error plotting %q: %v", m.name, err)
 			}
 			log.Printf("Saved plot: %s", m.file)
@@ -558,7 +668,7 @@ func main() {
 	}
 
 	log.Println("Benchmarks completed successfully and plots generated.")
-	saveMetricsJSON("benchmark_metrics.json", results, counterResults, wsResults)
+	saveMetricsJSON("benchmark_metrics.json", results, counterResults, taskResults, wsResults)
 }
 
 func runBenchmark(config Config) BenchmarkStats {
@@ -952,6 +1062,16 @@ func executeRequest(
 	}
 }
 
+func filterTargetsForBenchmark(targets []TargetConfig, bench string) []TargetConfig {
+	var filtered []TargetConfig
+	for _, t := range targets {
+		if t.SupportsBenchmark(bench) {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
 func plotMetric(
 	metricName string,
 	yLabel string,
@@ -1175,6 +1295,315 @@ func runCounterBenchmark(config Config) BenchmarkStats {
 	sampleCancel()
 
 	// Compute finalized stats
+	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
+	avgRPS := float64(totalReqs) / config.Duration.Seconds()
+
+	maxRPS := float64(0)
+	for _, val := range rpsBuckets {
+		if float64(val) > maxRPS {
+			maxRPS = float64(val)
+		}
+	}
+
+	avgLatency := time.Duration(0)
+	if totalReqs > 0 {
+		avgLatency = time.Duration(atomic.LoadInt64(&metrics.TotalLatency) / totalReqs)
+	}
+
+	avgConns := float64(0)
+	connSamplesMu.Lock()
+	if connSamplesCount > 0 {
+		avgConns = float64(connSamplesSum) / float64(connSamplesCount)
+	}
+	connSamplesMu.Unlock()
+
+	avgBytesSent := float64(0)
+	if totalReqs > 0 {
+		avgBytesSent = float64(atomic.LoadInt64(&metrics.TotalBytesSent)) / float64(totalReqs)
+	}
+
+	avgBytesRecv := float64(0)
+	if totalReqs > 0 {
+		avgBytesRecv = float64(atomic.LoadInt64(&metrics.TotalBytesReceived)) / float64(totalReqs)
+	}
+
+	return BenchmarkStats{
+		MaxConnections:     int64(maxTCPConns.Load()),
+		AvgConnections:     avgConns,
+		MaxRPS:             maxRPS,
+		AvgRPS:             avgRPS,
+		MaxLatency:         time.Duration(atomic.LoadInt64(&metrics.MaxLatency)),
+		AvgLatency:         avgLatency,
+		AvgBytesSent:       avgBytesSent,
+		MaxBytesSent:       atomic.LoadInt64(&metrics.MaxBytesSent),
+		TotalBytesSent:     atomic.LoadInt64(&metrics.TotalBytesSent),
+		AvgBytesReceived:   avgBytesRecv,
+		MaxBytesReceived:   atomic.LoadInt64(&metrics.MaxBytesReceived),
+		TotalBytesReceived: atomic.LoadInt64(&metrics.TotalBytesReceived),
+		TotalRequests:      totalReqs,
+		SuccessRequests:    atomic.LoadInt64(&metrics.SuccessRequests),
+		FailedRequests:     atomic.LoadInt64(&metrics.FailedRequests),
+		Errors:             atomic.LoadInt64(&metrics.Errors),
+	}
+}
+
+func executeTaskCycle(
+	client *fasthttp.Client,
+	baseURL string,
+	metrics *WorkerMetrics,
+	benchStart time.Time,
+	rpsBuckets []int64,
+	ctx context.Context,
+) {
+	cycleStart := time.Now()
+
+	submitURL := baseURL + "/api/task/"
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	req.Header.SetMethod("POST")
+	req.SetRequestURI(submitURL)
+	req.Header.Set("Cookie", "environment=%7B%7D")
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.SetBody([]byte("42"))
+
+	err := client.Do(req, resp)
+	if err != nil || resp.StatusCode() != 200 {
+		atomic.AddInt64(&metrics.Errors, 1)
+		atomic.AddInt64(&metrics.FailedRequests, 1)
+		fasthttp.ReleaseRequest(req)
+		fasthttp.ReleaseResponse(resp)
+		return
+	}
+
+	headerBytesSent, _ := req.Header.WriteTo(io.Discard)
+	bytesSent := headerBytesSent + int64(len(req.Body()))
+	headerBytesRecv, _ := resp.Header.WriteTo(io.Discard)
+	bytesRecv := headerBytesRecv + int64(len(resp.Body()))
+
+	var submitBody []byte
+	contentEncoding := resp.Header.Peek("Content-Encoding")
+	if bytes.EqualFold(contentEncoding, []byte("gzip")) {
+		var err error
+		submitBody, err = resp.BodyGunzip()
+		if err != nil {
+			atomic.AddInt64(&metrics.Errors, 1)
+			atomic.AddInt64(&metrics.FailedRequests, 1)
+			fasthttp.ReleaseRequest(req)
+			fasthttp.ReleaseResponse(resp)
+			return
+		}
+	} else {
+		submitBody = resp.Body()
+	}
+
+	taskID := strings.TrimSpace(string(submitBody))
+	fasthttp.ReleaseRequest(req)
+	fasthttp.ReleaseResponse(resp)
+
+	if taskID == "" {
+		atomic.AddInt64(&metrics.Errors, 1)
+		atomic.AddInt64(&metrics.FailedRequests, 1)
+		return
+	}
+
+	statusURL := baseURL + "/api/task/" + taskID + "/"
+	for {
+		select {
+		case <-ctx.Done():
+			atomic.AddInt64(&metrics.FailedRequests, 1)
+			return
+		default:
+		}
+
+		pReq := fasthttp.AcquireRequest()
+		pResp := fasthttp.AcquireResponse()
+		pReq.Header.SetMethod("GET")
+		pReq.SetRequestURI(statusURL)
+		pReq.Header.Set("Cookie", "environment=%7B%7D")
+		pReq.Header.Set("Accept-Encoding", "gzip")
+
+		pErr := client.Do(pReq, pResp)
+		if pErr != nil {
+			fasthttp.ReleaseRequest(pReq)
+			fasthttp.ReleaseResponse(pResp)
+			atomic.AddInt64(&metrics.Errors, 1)
+			atomic.AddInt64(&metrics.FailedRequests, 1)
+			return
+		}
+
+		pHeaderBytesSent, _ := pReq.Header.WriteTo(io.Discard)
+		bytesSent += pHeaderBytesSent + int64(len(pReq.Body()))
+		pHeaderBytesRecv, _ := pResp.Header.WriteTo(io.Discard)
+		bytesRecv += pHeaderBytesRecv + int64(len(pResp.Body()))
+
+		pStatusCode := pResp.StatusCode()
+		var pBody []byte
+		pContentEncoding := pResp.Header.Peek("Content-Encoding")
+		if bytes.EqualFold(pContentEncoding, []byte("gzip")) {
+			pBody, _ = pResp.BodyGunzip()
+		} else {
+			pBody = pResp.Body()
+		}
+
+		if pStatusCode == 200 {
+			var result struct {
+				Status  string `json:"status"`
+				Result  int64  `json:"result"`
+				Message *struct {
+					Status string `json:"status"`
+					Result int64  `json:"result"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal(pBody, &result); err == nil {
+				st := result.Status
+				resVal := result.Result
+				if result.Message != nil {
+					st = result.Message.Status
+					resVal = result.Message.Result
+				}
+				if st == "completed" && resVal == 43 {
+					fasthttp.ReleaseRequest(pReq)
+					fasthttp.ReleaseResponse(pResp)
+
+					cycleLatency := time.Since(cycleStart)
+					atomic.AddInt64(&metrics.TotalRequests, 1)
+					atomic.AddInt64(&metrics.SuccessRequests, 1)
+					atomic.AddInt64(&metrics.TotalBytesSent, bytesSent)
+					atomic.AddInt64(&metrics.TotalBytesReceived, bytesRecv)
+					atomic.AddInt64(&metrics.TotalLatency, int64(cycleLatency))
+
+					for {
+						curMax := atomic.LoadInt64(&metrics.MaxLatency)
+						if int64(cycleLatency) <= curMax {
+							break
+						}
+						if atomic.CompareAndSwapInt64(&metrics.MaxLatency, curMax, int64(cycleLatency)) {
+							break
+						}
+					}
+
+					for {
+						curMax := atomic.LoadInt64(&metrics.MaxBytesSent)
+						if bytesSent <= curMax {
+							break
+						}
+						if atomic.CompareAndSwapInt64(&metrics.MaxBytesSent, curMax, bytesSent) {
+							break
+						}
+					}
+
+					for {
+						curMax := atomic.LoadInt64(&metrics.MaxBytesReceived)
+						if bytesRecv <= curMax {
+							break
+						}
+						if atomic.CompareAndSwapInt64(&metrics.MaxBytesReceived, curMax, bytesRecv) {
+							break
+						}
+					}
+
+					elapsedSec := int(time.Since(benchStart).Seconds())
+					if elapsedSec >= 0 && elapsedSec < len(rpsBuckets) {
+						atomic.AddInt64(&rpsBuckets[elapsedSec], 1)
+					}
+					return
+				}
+			}
+		} else {
+			fasthttp.ReleaseRequest(pReq)
+			fasthttp.ReleaseResponse(pResp)
+			atomic.AddInt64(&metrics.Errors, 1)
+			atomic.AddInt64(&metrics.FailedRequests, 1)
+			return
+		}
+
+		fasthttp.ReleaseRequest(pReq)
+		fasthttp.ReleaseResponse(pResp)
+	}
+}
+
+func runTaskBenchmark(config Config) BenchmarkStats {
+	var activeTCPConns int32
+	var maxTCPConns atomic.Int32
+
+	client := &fasthttp.Client{
+		Name: "go-benchmark-client",
+		Dial: func(addr string) (net.Conn, error) {
+			conn, err := fasthttp.Dial(addr)
+			if err != nil {
+				return nil, err
+			}
+			atomic.AddInt32(&activeTCPConns, 1)
+
+			for {
+				curMax := maxTCPConns.Load()
+				curActive := atomic.LoadInt32(&activeTCPConns)
+				if curActive <= curMax {
+					break
+				}
+				if maxTCPConns.CompareAndSwap(curMax, curActive) {
+					break
+				}
+			}
+
+			return &watchedConn{
+				Conn:        conn,
+				activeCount: &activeTCPConns,
+			}, nil
+		},
+	}
+
+	metrics := &WorkerMetrics{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
+	defer cancel()
+
+	numSeconds := max(int(config.Duration.Seconds()), 1)
+	rpsBuckets := make([]int64, numSeconds)
+	benchStart := time.Now()
+
+	var connSamplesSum int64
+	var connSamplesCount int64
+	var connSamplesMu sync.Mutex
+	sampleCtx, sampleCancel := context.WithCancel(context.Background())
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-sampleCtx.Done():
+				return
+			case <-ticker.C:
+				val := atomic.LoadInt32(&activeTCPConns)
+				connSamplesMu.Lock()
+				connSamplesSum += int64(val)
+				connSamplesCount++
+				connSamplesMu.Unlock()
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(config.NumWorkers)
+
+	for i := 0; i < config.NumWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					executeTaskCycle(client, config.Target.URL, metrics, benchStart, rpsBuckets, ctx)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	sampleCancel()
+
 	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
 	avgRPS := float64(totalReqs) / config.Duration.Seconds()
 
@@ -1509,10 +1938,11 @@ type ExportedWSRecord struct {
 type ExportedData struct {
 	CRUD      []ExportedRecord   `json:"crud"`
 	Counter   []ExportedRecord   `json:"counter"`
+	Task      []ExportedRecord   `json:"task"`
 	WebSocket []ExportedWSRecord `json:"websocket"`
 }
 
-func saveMetricsJSON(filename string, crudResults map[Config]BenchmarkStats, counterResults map[Config]BenchmarkStats, wsResults map[string]map[Config]BenchmarkStats) {
+func saveMetricsJSON(filename string, crudResults map[Config]BenchmarkStats, counterResults map[Config]BenchmarkStats, taskResults map[Config]BenchmarkStats, wsResults map[string]map[Config]BenchmarkStats) {
 	var data ExportedData
 
 	// Read existing file if it exists, to preserve skipped benchmarks' metrics
@@ -1614,6 +2044,10 @@ func saveMetricsJSON(filename string, crudResults map[Config]BenchmarkStats, cou
 
 	if len(counterResults) > 0 {
 		data.Counter = updateRecords(data.Counter, counterResults)
+	}
+
+	if len(taskResults) > 0 {
+		data.Task = updateRecords(data.Task, taskResults)
 	}
 
 	if len(wsResults) > 0 {

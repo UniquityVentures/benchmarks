@@ -33,6 +33,8 @@ _ROUTES = [
     (re.compile(r"^/api/articles/?$"),                     "/api/method/benchmark_app.api.articles_list_create"),
     (re.compile(r"^/api/counter/?$"),                      "/api/method/benchmark_app.api.counter"),
     (re.compile(r"^/api/truncate/?$"),                     "/api/method/benchmark_app.api.truncate"),
+    (re.compile(r"^/api/task/(?P<task_id>[^/]+)/?$"),       "/api/method/benchmark_app.api.task_status"),
+    (re.compile(r"^/api/task/?$"),                         "/api/method/benchmark_app.api.task_submit"),
 ]
 
 

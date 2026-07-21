@@ -4,3 +4,6 @@
 [submodule "frappe"]
 	path = frappe
 	url = https://github.com/frappe/frappe
+[submodule "odoo-benchmark/queue"]
+	path = odoo-benchmark/queue
+	url = https://github.com/OCA/queue

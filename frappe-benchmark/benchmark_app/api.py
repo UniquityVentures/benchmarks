@@ -156,3 +156,45 @@ def truncate():
     except Exception as e:
         frappe.response.status_code = 500
         return {"error": str(e)}
+
+
+def run_task_job(task_id, val):
+    res = {"status": "completed", "result": int(val) + 1}
+    frappe.cache().set_value(f"task_{task_id}", json.dumps(res))
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def task_submit():
+    try:
+        raw = (frappe.request.data or b"").decode("utf-8").strip()
+        val = int(raw)
+    except Exception:
+        frappe.response.status_code = 400
+        return {"error": "invalid integer payload"}
+
+    task_id = frappe.generate_hash(length=12)
+    frappe.cache().set_value(f"task_{task_id}", json.dumps({"status": "pending"}))
+    frappe.enqueue("benchmark_app.api.run_task_job", queue="default", task_id=task_id, val=val)
+
+    frappe.response["type"] = "download"
+    frappe.response["filename"] = "task.txt"
+    frappe.response["filecontent"] = task_id
+    frappe.response["content_type"] = "text/plain"
+    frappe.response["display_content_as"] = "inline"
+    return task_id
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def task_status(task_id=None):
+    if not task_id:
+        task_id = frappe.request.args.get("task_id") or frappe.form_dict.get("task_id")
+    if not task_id:
+        frappe.response.status_code = 400
+        return {"error": "task_id required"}
+    raw = frappe.cache().get_value(f"task_{task_id}")
+    if not raw:
+        frappe.response.status_code = 404
+        return {"error": "task not found"}
+    data = json.loads(raw)
+    frappe.response.update(data)
+    return

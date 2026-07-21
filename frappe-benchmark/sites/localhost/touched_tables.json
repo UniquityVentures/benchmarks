@@ -1,11 +1,7 @@
 [
-    "tabSingles",
-    "tabError Log",
-    "tabBenchmark Article",
-    "tabInstalled",
-    "tabInstalled Application",
+    "tabNavbar Item",
     "tabNavbar",
-    "tabError",
-    "tabBenchmark",
-    "tabNavbar Item"
+    "tabInstalled",
+    "tabSingles",
+    "tabInstalled Application"
 ]

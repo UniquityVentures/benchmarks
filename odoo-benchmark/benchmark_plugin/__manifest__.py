@@ -4,7 +4,7 @@
     'summary': 'Benchmark endpoints for Counter, CRUD, and WebSockets',
     'category': 'Tools',
     'author': 'Lariv',
-    'depends': ['base', 'bus'],
+    'depends': ['base', 'bus', 'queue_job'],
     'data': [],
     'installable': True,
     'application': True,

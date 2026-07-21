@@ -14,9 +14,11 @@ export ODOO_MAX_HTTP_THREADS=1000
 
 
 exec uv run python3 "$BENCHMARKS_DIR/odoo/odoo-bin" \
-    --addons-path="$SCRIPT_DIR,$BENCHMARKS_DIR/odoo/addons" \
+    --addons-path="$SCRIPT_DIR,$SCRIPT_DIR/queue,$BENCHMARKS_DIR/odoo/addons" \
     -d odoo_benchmark \
-    -i benchmark_plugin \
+    -i benchmark_plugin,queue_job \
+    -u benchmark_plugin,queue_job \
+    --load=base,web,queue_job \
     -p 8126 \
     --workers 0 \
     --db_maxconn 2048 \

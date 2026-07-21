@@ -1,3 +1,4 @@
+import asyncio
 import json
 from django.http import HttpResponse, JsonResponse
 from django.views import View
@@ -76,6 +77,7 @@ class ArticleTruncateView(View):
                 cursor.execute("TRUNCATE TABLE articles RESTART IDENTITY CASCADE;")
                 
         await sync_to_async(do_truncate)()
+        _task_store.clear()
         return HttpResponse(status=204)
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -89,6 +91,54 @@ class CounterView(View):
             return JsonResponse({'counter': int(counter) + 1})
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
+
+import os
+from celery.result import AsyncResult
+from .tasks import increment_task
+
+_task_seq = 0
+_task_store = {}
+
+async def _process_task(task_id: str, val: int):
+    _task_store[task_id] = {
+        'status': 'completed',
+        'result': val + 1
+    }
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TaskSubmitView(View):
+    async def post(self, request, *args, **kwargs):
+        try:
+            val = int(request.body.decode('utf-8').strip())
+        except ValueError:
+            return HttpResponse("invalid integer payload", status=400)
+
+        if os.environ.get("USE_CELERY") == "1":
+            async_res = increment_task.delay(val)
+            return HttpResponse(async_res.id, content_type="text/plain")
+
+        global _task_seq
+        _task_seq += 1
+        task_id = str(_task_seq)
+        _task_store[task_id] = {'status': 'pending'}
+
+        asyncio.create_task(_process_task(task_id, val))
+
+        return HttpResponse(task_id, content_type="text/plain")
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TaskStatusView(View):
+    async def get(self, request, task_id, *args, **kwargs):
+        if os.environ.get("USE_CELERY") == "1":
+            res = AsyncResult(str(task_id))
+            if res.ready():
+                return JsonResponse({'status': 'completed', 'result': res.result})
+            return JsonResponse({'status': 'pending'})
+
+        res = _task_store.get(str(task_id))
+        if res is None:
+            return HttpResponse("task not found", status=404)
+        return JsonResponse(res)
 
 from django.http import HttpResponseBadRequest
 

@@ -61,6 +61,7 @@ func pluginRoutes() lariv.PluginFeatures[lariv.Route] {
 							http.Error(w, err.Error(), http.StatusInternalServerError)
 							return
 						}
+						ResetTaskStore()
 						w.WriteHeader(http.StatusNoContent)
 					}),
 				},
@@ -84,6 +85,20 @@ func pluginRoutes() lariv.PluginFeatures[lariv.Route] {
 							return
 						}
 					}),
+				},
+			},
+			{
+				Key: "benchmark.TaskSubmitRoute",
+				Value: lariv.Route{
+					Path:    "POST /api/task/",
+					Handler: http.HandlerFunc(TaskSubmitHandler),
+				},
+			},
+			{
+				Key: "benchmark.TaskStatusRoute",
+				Value: lariv.Route{
+					Path:    "GET /api/task/{id}/",
+					Handler: http.HandlerFunc(TaskStatusHandler),
 				},
 			},
 			{

@@ -36,7 +36,13 @@ fi
 # 2. Sync database schema (runs patches, syncs doctypes)
 uv run python3 -m frappe.utils.bench_helper frappe --site localhost migrate
 
-# 3. Start web server
+# 3. Start background worker
+echo "Starting Frappe background worker..."
+uv run python3 -m frappe.utils.bench_helper frappe --site localhost worker --queue default --quiet &
+WORKER_PID=$!
+trap "kill $WORKER_PID 2>/dev/null" EXIT
+
+# 4. Start web server
 exec uv run gunicorn benchmark_app.wsgi:application \
     --bind 0.0.0.0:8127 \
     --workers 4 \

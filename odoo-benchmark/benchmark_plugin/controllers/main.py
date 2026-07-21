@@ -162,7 +162,7 @@ class BenchmarkController(http.Controller):
     @http.route(['/api/truncate', '/api/truncate/'], type='http', auth='none', methods=['POST'], csrf=False, cors='*')
     def truncate_articles(self, **kwargs):
         def _truncate():
-            request.env.cr.execute("TRUNCATE TABLE benchmark_article RESTART IDENTITY CASCADE;")
+            request.env.cr.execute("TRUNCATE TABLE benchmark_article, benchmark_task RESTART IDENTITY CASCADE;")
             request.env.cr.commit()
             return Response(status=204)
 
@@ -171,11 +171,45 @@ class BenchmarkController(http.Controller):
         except Exception as e:
             return Response(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
 
+    @http.route(['/api/task', '/api/task/'], type='http', auth='none', methods=['POST'], csrf=False, cors='*')
+    def task_submit(self, **kwargs):
+        try:
+            raw_body = request.httprequest.data
+            val = int(raw_body.decode('utf-8').strip())
+        except Exception:
+            return Response(json.dumps({'error': 'invalid integer payload'}), status=400, mimetype='application/json')
+
+        def _create_task():
+            task = request.env['benchmark.task'].sudo().create({'val': val, 'state': 'pending'})
+            task.with_delay().run_increment_job()
+            return Response(str(task.id), status=200, mimetype='text/plain')
+
+        try:
+            return service_model.retrying(_create_task, env=request.env)
+        except Exception as e:
+            request.env.cr.rollback()
+            return Response(json.dumps({'error': str(e)}), status=500, mimetype='application/json')
+
+    @http.route(['/api/task/<int:task_id>', '/api/task/<int:task_id>/'], type='http', auth='none', methods=['GET'], csrf=False, cors='*')
+    def task_status(self, task_id, **kwargs):
+        task = request.env['benchmark.task'].sudo().browse(task_id)
+        if not task.exists():
+            return Response(json.dumps({'error': 'Not found'}), status=404, mimetype='application/json')
+
+        if task.state == 'completed':
+            res = json.dumps({'status': 'completed', 'result': task.result})
+        else:
+            res = json.dumps({'status': 'pending'})
+        return Response(res, status=200, mimetype='application/json')
+
 
     @http.route(['/api/ws', '/api/ws/'], type='http', auth='none', cors='*', websocket=True)
     def api_ws(self, **kwargs):
+        sock = request.httprequest._HTTPRequest__environ.get('socket')
+        if not sock:
+            return Response("Websockets require Gevent evented server (--workers 0)", status=400)
+
         response = WebsocketConnectionHandler._get_handshake_response(request.httprequest.headers)
-        sock = request.httprequest._HTTPRequest__environ['socket']
         session = request.session
         httprequest = request.httprequest
 
