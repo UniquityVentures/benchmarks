@@ -13,7 +13,7 @@ The benchmark suite is implemented in Go (`main.go`) for maximum throughput, low
 3. [Benchmark Workflows & Methodologies](#benchmark-workflows--methodologies)
    - [1. CRUD Benchmark (`crud`)](#1-crud-benchmark-crud)
    - [2. Counter Benchmark (`counter`)](#2-counter-benchmark-counter)
-   - [3. Background Task Benchmark (`task`)](#3-background-task-benchmark-task)
+   - [3. AI Benchmark (`task`)](#3-ai-benchmark-task)
    - [4. WebSocket Benchmark (`websocket`)](#4-websocket-benchmark-websocket)
 4. [Metrics & Measurement Methodology](#metrics--measurement-methodology)
 5. [Database Isolation & Cleanup](#database-isolation--cleanup)
@@ -28,8 +28,8 @@ The benchmarking runner (`main.go`) is built using [fasthttp](https://github.com
 ### Key Harness Features
 
 - **Concurrent Worker Pools**: A configurable number of concurrent worker goroutines (`workers = [1, 50, 500]`) execute test cycles in parallel against target backends.
-- **TCP Connection Monitoring (`watchedConn`)**: Wraps standard `net.Conn` connections to monitor active TCP sockets dynamically. A background sampler goroutine ticks every 10 milliseconds to record average and peak active TCP connection counts.
-- **RPS Bucketing**: Request-per-second (RPS) counts are grouped into 1-second time buckets to compute exact `Max RPS` spikes alongside `Average RPS`.
+- **TCP Connection Monitoring (`ConnTracker` & `watchedConn`)**: Wraps standard `net.Conn` connections to monitor active TCP sockets dynamically. Computes exact time-weighted continuous averages ($\int N(t)dt / T_{elapsed}$) and peak active socket counts without polling loops or tickers.
+- **Exact Elapsed Timing & RPS Bucketing**: Computes true `Average RPS` by dividing total completed requests by the actual measured elapsed duration between run start and finish (`benchEnd.Sub(benchStart)`). Request-per-second counts are also grouped into 1-second time buckets to record peak `Max RPS` spikes.
 - **Payload Decompression & Wire Measurement**: Accurate calculation of wire data transfer (HTTP headers + body). For Gzip-compressed responses, bytes sent/received reflect wire footprint while response bodies are uncompressed in memory for payload validation.
 
 ---
@@ -89,15 +89,15 @@ Each worker continuously selects one of 3 workflows with equal probability (`ran
 
 ---
 
-### 3. Background Task Benchmark (`task`)
+### 3. AI Benchmark (`task`)
 
 * **Endpoints**:
   - Submission: `POST /api/task/`
   - Status Polling: `GET /api/task/<task_id>/`
-* **Objective**: Test background task scheduling, asynchronous job queue execution (e.g. Celery, async worker routines), non-blocking request handling, and status polling efficiency.
+* **Objective**: Test AI job scheduling, asynchronous worker queue execution (e.g. Celery, async worker routines for AI background tasks), non-blocking request handling, and status polling efficiency.
 * **Methodology**:
   - Each worker goroutine executes a complete 2-phase lifecycle per iteration:
-    1. **Task Submission**: Worker sends `POST /api/task/` with plain text integer body `"42"`. Target server enqueues a background job to increment the number and immediately returns a unique string `task_id`.
+    1. **Task Submission**: Worker sends `POST /api/task/` with plain text integer body `"42"`. Target server enqueues an asynchronous AI task and immediately returns a unique string `task_id`.
     2. **Status Polling**: Worker enters a non-blocking loop issuing `GET /api/task/<task_id>/` until the job reports completion.
   - **Completion Criterion**: The cycle is complete when status equals `"completed"` with calculated `result: 43`.
   - Latency measurement spans the total duration from initial task submission to final completed status polling response.

@@ -22,7 +22,7 @@ type TaskResult struct {
 var (
 	taskChan   chan TaskJob
 	taskStore  sync.Map // map[string]*TaskResult
-	taskSeq    uint64
+	taskSeq    atomic.Uint64
 	workerOnce sync.Once
 )
 
@@ -30,7 +30,7 @@ func initWorkerPool() {
 	workerOnce.Do(func() {
 		taskChan = make(chan TaskJob, 500000)
 		numWorkers := 32
-		for i := 0; i < numWorkers; i++ {
+		for range numWorkers {
 			go func() {
 				for job := range taskChan {
 					res := &TaskResult{
@@ -68,7 +68,7 @@ func TaskSubmitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idNum := atomic.AddUint64(&taskSeq, 1)
+	idNum := taskSeq.Add(1)
 	idStr := strconv.FormatUint(idNum, 10)
 
 	taskStore.Store(idStr, &TaskResult{Status: "pending"})

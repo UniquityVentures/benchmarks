@@ -254,16 +254,68 @@ func (p *SafeIDPool) RemoveOldest() (uint, bool) {
 	return val, true
 }
 
+// ConnTracker calculates exact time-weighted average and peak active connections without polling.
+type ConnTracker struct {
+	mu          sync.Mutex
+	startTime   time.Time
+	active      int64
+	max         int64
+	totalConnNs int64
+	lastUpdate  time.Time
+}
+
+func NewConnTracker(start time.Time) *ConnTracker {
+	return &ConnTracker{
+		startTime:  start,
+		lastUpdate: start,
+	}
+}
+
+func (c *ConnTracker) Incr() {
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.totalConnNs += c.active * now.Sub(c.lastUpdate).Nanoseconds()
+	c.lastUpdate = now
+	c.active++
+	if c.active > c.max {
+		c.max = c.active
+	}
+}
+
+func (c *ConnTracker) Decr() {
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.totalConnNs += c.active * now.Sub(c.lastUpdate).Nanoseconds()
+	c.lastUpdate = now
+	if c.active > 0 {
+		c.active--
+	}
+}
+
+func (c *ConnTracker) Finalize(end time.Time) (avgConns float64, maxConns int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.totalConnNs += c.active * end.Sub(c.lastUpdate).Nanoseconds()
+	c.lastUpdate = end
+	elapsedNs := end.Sub(c.startTime).Nanoseconds()
+	if elapsedNs > 0 {
+		avgConns = float64(c.totalConnNs) / float64(elapsedNs)
+	}
+	return avgConns, c.max
+}
+
 // watchedConn wraps net.Conn to track open/closed TCP connections.
 type watchedConn struct {
 	net.Conn
-	activeCount *int32
-	closed      int32
+	tracker *ConnTracker
+	closed  int32
 }
 
 func (w *watchedConn) Close() error {
 	if atomic.CompareAndSwapInt32(&w.closed, 0, 1) {
-		atomic.AddInt32(w.activeCount, -1)
+		w.tracker.Decr()
 	}
 	return w.Conn.Close()
 }
@@ -348,7 +400,7 @@ func main() {
 	wsFlag := flag.Bool("ws", false, "Run the websocket benchmarks")
 	crudFlag := flag.Bool("crud", false, "Run the crud benchmarks")
 	counterFlag := flag.Bool("counter", false, "Run the counter benchmarks")
-	taskFlag := flag.Bool("task", false, "Run the background task benchmarks")
+	taskFlag := flag.Bool("task", false, "Run the AI benchmarks")
 	allFlag := flag.Bool("all", false, "Run all benchmarks")
 	flag.Parse()
 
@@ -475,7 +527,7 @@ func main() {
 		}
 	}
 
-	// Permutation loop for Task
+	// Permutation loop for Task (AI Benchmarks)
 	taskResults := make(map[Config]BenchmarkStats)
 	if runTask {
 		for _, target := range targets {
@@ -491,13 +543,13 @@ func main() {
 				}
 
 				log.Printf("================================================================================")
-				log.Printf("STARTING TASK BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
+				log.Printf("STARTING AI BENCHMARK: Target=%s (%s) | Workers=%d | Duration=%s | Cooldown=%s",
 					config.Target.Name, config.Target.URL, config.NumWorkers, config.Duration, config.Cooldown)
 
 				stats := runTaskBenchmark(config)
 				taskResults[config] = stats
 
-				log.Printf("TASK BENCHMARK FINISHED. Tasks Completed: %d | Increments / RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
+				log.Printf("AI BENCHMARK FINISHED. Tasks Completed: %d | Increments / RPS: %.2f | Avg Latency: %v | Avg Conn: %.2f",
 					stats.TotalRequests, stats.AvgRPS, stats.AvgLatency, stats.AvgConnections)
 
 				if config.Cooldown > 0 {
@@ -619,7 +671,7 @@ func main() {
 	}
 
 	if runTask {
-		log.Println("Generating SVG Plots for Task Benchmark...")
+		log.Println("Generating SVG Plots for AI Benchmark...")
 		taskMetricsToPlot := []struct {
 			name   string
 			yLabel string
@@ -672,10 +724,9 @@ func main() {
 }
 
 func runBenchmark(config Config) BenchmarkStats {
-	var activeTCPConns int32
-	var maxTCPConns atomic.Int32
+	benchStart := time.Now()
+	connTracker := NewConnTracker(benchStart)
 
-	// Setup custom fasthttp client to monitor connections
 	client := &fasthttp.Client{
 		Name: "go-benchmark-client",
 		Dial: func(addr string) (net.Conn, error) {
@@ -683,23 +734,10 @@ func runBenchmark(config Config) BenchmarkStats {
 			if err != nil {
 				return nil, err
 			}
-			atomic.AddInt32(&activeTCPConns, 1)
-
-			// Update maxTCPConns
-			for {
-				curMax := maxTCPConns.Load()
-				curActive := atomic.LoadInt32(&activeTCPConns)
-				if curActive <= curMax {
-					break
-				}
-				if maxTCPConns.CompareAndSwap(curMax, curActive) {
-					break
-				}
-			}
-
+			connTracker.Incr()
 			return &watchedConn{
-				Conn:        conn,
-				activeCount: &activeTCPConns,
+				Conn:    conn,
+				tracker: connTracker,
 			}, nil
 		},
 	}
@@ -710,33 +748,8 @@ func runBenchmark(config Config) BenchmarkStats {
 	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
 	defer cancel()
 
-	// Track RPS buckets (1-second intervals)
-	numSeconds := max(int(config.Duration.Seconds()), 1)
+	numSeconds := max(int(config.Duration.Seconds())+10, 10)
 	rpsBuckets := make([]int64, numSeconds)
-	benchStart := time.Now()
-
-	// Start connection sampler
-	var connSamplesSum int64
-	var connSamplesCount int64
-	var connSamplesMu sync.Mutex
-	sampleCtx, sampleCancel := context.WithCancel(context.Background())
-
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-sampleCtx.Done():
-				return
-			case <-ticker.C:
-				val := atomic.LoadInt32(&activeTCPConns)
-				connSamplesMu.Lock()
-				connSamplesSum += int64(val)
-				connSamplesCount++
-				connSamplesMu.Unlock()
-			}
-		}
-	}()
 
 	var wg sync.WaitGroup
 	wg.Add(config.NumWorkers)
@@ -757,11 +770,17 @@ func runBenchmark(config Config) BenchmarkStats {
 	}
 
 	wg.Wait()
-	sampleCancel()
+	benchEnd := time.Now()
+	elapsed := benchEnd.Sub(benchStart)
+	elapsedSeconds := elapsed.Seconds()
 
-	// Compute finalized stats
+	avgConns, maxConns := connTracker.Finalize(benchEnd)
+
 	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
-	avgRPS := float64(totalReqs) / config.Duration.Seconds()
+	avgRPS := float64(0)
+	if elapsedSeconds > 0 {
+		avgRPS = float64(totalReqs) / elapsedSeconds
+	}
 
 	maxRPS := float64(0)
 	for _, val := range rpsBuckets {
@@ -775,13 +794,6 @@ func runBenchmark(config Config) BenchmarkStats {
 		avgLatency = time.Duration(atomic.LoadInt64(&metrics.TotalLatency) / totalReqs)
 	}
 
-	avgConns := float64(0)
-	connSamplesMu.Lock()
-	if connSamplesCount > 0 {
-		avgConns = float64(connSamplesSum) / float64(connSamplesCount)
-	}
-	connSamplesMu.Unlock()
-
 	avgBytesSent := float64(0)
 	if totalReqs > 0 {
 		avgBytesSent = float64(atomic.LoadInt64(&metrics.TotalBytesSent)) / float64(totalReqs)
@@ -793,7 +805,7 @@ func runBenchmark(config Config) BenchmarkStats {
 	}
 
 	return BenchmarkStats{
-		MaxConnections:     int64(maxTCPConns.Load()),
+		MaxConnections:     maxConns,
 		AvgConnections:     avgConns,
 		MaxRPS:             maxRPS,
 		AvgRPS:             avgRPS,
@@ -1209,10 +1221,9 @@ func executeCounterRequest(
 }
 
 func runCounterBenchmark(config Config) BenchmarkStats {
-	var activeTCPConns int32
-	var maxTCPConns atomic.Int32
+	benchStart := time.Now()
+	connTracker := NewConnTracker(benchStart)
 
-	// Setup custom fasthttp client to monitor connections
 	client := &fasthttp.Client{
 		Name: "go-benchmark-client",
 		Dial: func(addr string) (net.Conn, error) {
@@ -1220,23 +1231,10 @@ func runCounterBenchmark(config Config) BenchmarkStats {
 			if err != nil {
 				return nil, err
 			}
-			atomic.AddInt32(&activeTCPConns, 1)
-
-			// Update maxTCPConns
-			for {
-				curMax := maxTCPConns.Load()
-				curActive := atomic.LoadInt32(&activeTCPConns)
-				if curActive <= curMax {
-					break
-				}
-				if maxTCPConns.CompareAndSwap(curMax, curActive) {
-					break
-				}
-			}
-
+			connTracker.Incr()
 			return &watchedConn{
-				Conn:        conn,
-				activeCount: &activeTCPConns,
+				Conn:    conn,
+				tracker: connTracker,
 			}, nil
 		},
 	}
@@ -1246,33 +1244,8 @@ func runCounterBenchmark(config Config) BenchmarkStats {
 	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
 	defer cancel()
 
-	// Track RPS buckets (1-second intervals)
-	numSeconds := max(int(config.Duration.Seconds()), 1)
+	numSeconds := max(int(config.Duration.Seconds())+10, 10)
 	rpsBuckets := make([]int64, numSeconds)
-	benchStart := time.Now()
-
-	// Start connection sampler
-	var connSamplesSum int64
-	var connSamplesCount int64
-	var connSamplesMu sync.Mutex
-	sampleCtx, sampleCancel := context.WithCancel(context.Background())
-
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-sampleCtx.Done():
-				return
-			case <-ticker.C:
-				val := atomic.LoadInt32(&activeTCPConns)
-				connSamplesMu.Lock()
-				connSamplesSum += int64(val)
-				connSamplesCount++
-				connSamplesMu.Unlock()
-			}
-		}
-	}()
 
 	var wg sync.WaitGroup
 	wg.Add(config.NumWorkers)
@@ -1292,11 +1265,17 @@ func runCounterBenchmark(config Config) BenchmarkStats {
 	}
 
 	wg.Wait()
-	sampleCancel()
+	benchEnd := time.Now()
+	elapsed := benchEnd.Sub(benchStart)
+	elapsedSeconds := elapsed.Seconds()
 
-	// Compute finalized stats
+	avgConns, maxConns := connTracker.Finalize(benchEnd)
+
 	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
-	avgRPS := float64(totalReqs) / config.Duration.Seconds()
+	avgRPS := float64(0)
+	if elapsedSeconds > 0 {
+		avgRPS = float64(totalReqs) / elapsedSeconds
+	}
 
 	maxRPS := float64(0)
 	for _, val := range rpsBuckets {
@@ -1310,13 +1289,6 @@ func runCounterBenchmark(config Config) BenchmarkStats {
 		avgLatency = time.Duration(atomic.LoadInt64(&metrics.TotalLatency) / totalReqs)
 	}
 
-	avgConns := float64(0)
-	connSamplesMu.Lock()
-	if connSamplesCount > 0 {
-		avgConns = float64(connSamplesSum) / float64(connSamplesCount)
-	}
-	connSamplesMu.Unlock()
-
 	avgBytesSent := float64(0)
 	if totalReqs > 0 {
 		avgBytesSent = float64(atomic.LoadInt64(&metrics.TotalBytesSent)) / float64(totalReqs)
@@ -1328,7 +1300,7 @@ func runCounterBenchmark(config Config) BenchmarkStats {
 	}
 
 	return BenchmarkStats{
-		MaxConnections:     int64(maxTCPConns.Load()),
+		MaxConnections:     maxConns,
 		AvgConnections:     avgConns,
 		MaxRPS:             maxRPS,
 		AvgRPS:             avgRPS,
@@ -1523,8 +1495,8 @@ func executeTaskCycle(
 }
 
 func runTaskBenchmark(config Config) BenchmarkStats {
-	var activeTCPConns int32
-	var maxTCPConns atomic.Int32
+	benchStart := time.Now()
+	connTracker := NewConnTracker(benchStart)
 
 	client := &fasthttp.Client{
 		Name: "go-benchmark-client",
@@ -1533,22 +1505,10 @@ func runTaskBenchmark(config Config) BenchmarkStats {
 			if err != nil {
 				return nil, err
 			}
-			atomic.AddInt32(&activeTCPConns, 1)
-
-			for {
-				curMax := maxTCPConns.Load()
-				curActive := atomic.LoadInt32(&activeTCPConns)
-				if curActive <= curMax {
-					break
-				}
-				if maxTCPConns.CompareAndSwap(curMax, curActive) {
-					break
-				}
-			}
-
+			connTracker.Incr()
 			return &watchedConn{
-				Conn:        conn,
-				activeCount: &activeTCPConns,
+				Conn:    conn,
+				tracker: connTracker,
 			}, nil
 		},
 	}
@@ -1558,31 +1518,8 @@ func runTaskBenchmark(config Config) BenchmarkStats {
 	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
 	defer cancel()
 
-	numSeconds := max(int(config.Duration.Seconds()), 1)
+	numSeconds := max(int(config.Duration.Seconds())+10, 10)
 	rpsBuckets := make([]int64, numSeconds)
-	benchStart := time.Now()
-
-	var connSamplesSum int64
-	var connSamplesCount int64
-	var connSamplesMu sync.Mutex
-	sampleCtx, sampleCancel := context.WithCancel(context.Background())
-
-	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-sampleCtx.Done():
-				return
-			case <-ticker.C:
-				val := atomic.LoadInt32(&activeTCPConns)
-				connSamplesMu.Lock()
-				connSamplesSum += int64(val)
-				connSamplesCount++
-				connSamplesMu.Unlock()
-			}
-		}
-	}()
 
 	var wg sync.WaitGroup
 	wg.Add(config.NumWorkers)
@@ -1602,10 +1539,17 @@ func runTaskBenchmark(config Config) BenchmarkStats {
 	}
 
 	wg.Wait()
-	sampleCancel()
+	benchEnd := time.Now()
+	elapsed := benchEnd.Sub(benchStart)
+	elapsedSeconds := elapsed.Seconds()
+
+	avgConns, maxConns := connTracker.Finalize(benchEnd)
 
 	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
-	avgRPS := float64(totalReqs) / config.Duration.Seconds()
+	avgRPS := float64(0)
+	if elapsedSeconds > 0 {
+		avgRPS = float64(totalReqs) / elapsedSeconds
+	}
 
 	maxRPS := float64(0)
 	for _, val := range rpsBuckets {
@@ -1619,13 +1563,6 @@ func runTaskBenchmark(config Config) BenchmarkStats {
 		avgLatency = time.Duration(atomic.LoadInt64(&metrics.TotalLatency) / totalReqs)
 	}
 
-	avgConns := float64(0)
-	connSamplesMu.Lock()
-	if connSamplesCount > 0 {
-		avgConns = float64(connSamplesSum) / float64(connSamplesCount)
-	}
-	connSamplesMu.Unlock()
-
 	avgBytesSent := float64(0)
 	if totalReqs > 0 {
 		avgBytesSent = float64(atomic.LoadInt64(&metrics.TotalBytesSent)) / float64(totalReqs)
@@ -1637,7 +1574,7 @@ func runTaskBenchmark(config Config) BenchmarkStats {
 	}
 
 	return BenchmarkStats{
-		MaxConnections:     int64(maxTCPConns.Load()),
+		MaxConnections:     maxConns,
 		AvgConnections:     avgConns,
 		MaxRPS:             maxRPS,
 		AvgRPS:             avgRPS,
@@ -1657,15 +1594,15 @@ func runTaskBenchmark(config Config) BenchmarkStats {
 }
 
 func runWebsocketBenchmark(config Config, clientSize, serverSize string) BenchmarkStats {
+	benchStart := time.Now()
+	connTracker := NewConnTracker(benchStart)
 	metrics := &WorkerMetrics{}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
 	defer cancel()
 
-	// Track RPS buckets (1-second intervals)
-	numSeconds := max(int(config.Duration.Seconds()), 1)
+	numSeconds := max(int(config.Duration.Seconds())+10, 10)
 	rpsBuckets := make([]int64, numSeconds)
-	benchStart := time.Now()
 
 	// Determine client payload
 	var dataPayload any
@@ -1688,9 +1625,6 @@ func runWebsocketBenchmark(config Config, clientSize, serverSize string) Benchma
 	if err != nil {
 		log.Fatalf("failed to marshal websocket request payload: %v", err)
 	}
-
-	var activeTCPConns int32
-	var maxTCPConns atomic.Int32
 
 	var wg sync.WaitGroup
 	wg.Add(config.NumWorkers)
@@ -1716,19 +1650,11 @@ func runWebsocketBenchmark(config Config, clientSize, serverSize string) Benchma
 				}
 				return
 			}
-			defer ws.Close()
-
-			atomic.AddInt32(&activeTCPConns, 1)
-			for {
-				curMax := maxTCPConns.Load()
-				curActive := atomic.LoadInt32(&activeTCPConns)
-				if curActive <= curMax {
-					break
-				}
-				if maxTCPConns.CompareAndSwap(curMax, curActive) {
-					break
-				}
-			}
+			connTracker.Incr()
+			defer func() {
+				ws.Close()
+				connTracker.Decr()
+			}()
 
 			// Read/Write loop
 			for {
@@ -1778,10 +1704,17 @@ func runWebsocketBenchmark(config Config, clientSize, serverSize string) Benchma
 	}
 
 	wg.Wait()
+	benchEnd := time.Now()
+	elapsed := benchEnd.Sub(benchStart)
+	elapsedSeconds := elapsed.Seconds()
 
-	// Compute finalized stats
+	avgConns, maxConns := connTracker.Finalize(benchEnd)
+
 	totalReqs := atomic.LoadInt64(&metrics.TotalRequests)
-	avgRPS := float64(totalReqs) / config.Duration.Seconds()
+	avgRPS := float64(0)
+	if elapsedSeconds > 0 {
+		avgRPS = float64(totalReqs) / elapsedSeconds
+	}
 
 	maxRPS := float64(0)
 	for _, val := range rpsBuckets {
@@ -1806,8 +1739,8 @@ func runWebsocketBenchmark(config Config, clientSize, serverSize string) Benchma
 	}
 
 	return BenchmarkStats{
-		MaxConnections:     int64(maxTCPConns.Load()),
-		AvgConnections:     float64(maxTCPConns.Load()),
+		MaxConnections:     maxConns,
+		AvgConnections:     avgConns,
 		MaxRPS:             maxRPS,
 		AvgRPS:             avgRPS,
 		MaxLatency:         time.Duration(atomic.LoadInt64(&metrics.MaxLatency)),

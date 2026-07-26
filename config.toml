@@ -14,16 +14,6 @@ url = "http://localhost:8123"
 benchmarks = ["crud", "counter", "task", "websocket"]
 
 [[targets]]
-name = "Django Local Server ASGI"
-url = "http://localhost:8124"
-benchmarks = ["crud", "counter", "task", "websocket"]
-
-[[targets]]
-name = "Django Local Server WSGI"
-url = "http://localhost:8125"
-benchmarks = ["crud", "counter", "task"]
-
-[[targets]]
 name = "Odoo Local Server"
 url = "http://localhost:8126"
 benchmarks = ["crud", "counter", "task", "websocket"]
