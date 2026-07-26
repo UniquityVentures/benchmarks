@@ -1,11 +1,10 @@
 module lariv-benchmark
 
-go 1.25.9
+go 1.26.5
 
 require (
 	github.com/coder/websocket v1.8.15
-	github.com/lariv-in/lariv v0.6.5
-	maragu.dev/gomponents v1.3.0
+	github.com/lariv-in/lariv v0.6.10
 )
 
 require (

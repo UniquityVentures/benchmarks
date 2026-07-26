@@ -15,12 +15,12 @@ func main() {
 		benchmark.GetPlugin(),
 	}
 
-	config, err := lariv.LoadConfigFromFile("config.toml", plugins)
+	app, err := lariv.NewBuilder().AddPlugins(plugins).LoadConfigFromFile("config.toml")
 	if err != nil {
 		log.Fatalf("failed loading configuration file: %v", err)
 	}
 
-	if err := lariv.Start(config, plugins); err != nil {
+	if err := app.Start(); err != nil {
 		log.Fatalf("failed executing application entry: %v", err)
 	}
 }

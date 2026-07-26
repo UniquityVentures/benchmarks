@@ -3,6 +3,7 @@ package benchmark
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/lariv-in/lariv"
@@ -10,7 +11,6 @@ import (
 	"github.com/lariv-in/lariv/getters"
 	"github.com/lariv-in/lariv/registry"
 	"github.com/lariv-in/lariv/views"
-	"maragu.dev/gomponents"
 )
 
 // DummyForm implements components.FormInterface to parse JSON requests
@@ -22,7 +22,7 @@ func (DummyForm) GetKey() string { return "dummy_form" }
 
 func (DummyForm) GetRoles() []string { return nil }
 
-func (DummyForm) Build(ctx context.Context) gomponents.Node {
+func (DummyForm) Build(components.Catalog, context.Context, io.Writer) error {
 	return nil
 }
 
@@ -46,7 +46,7 @@ func (DummyPage) GetKey() string { return "dummy_page" }
 
 func (DummyPage) GetRoles() []string { return nil }
 
-func (DummyPage) Build(ctx context.Context) gomponents.Node {
+func (DummyPage) Build(components.Catalog, context.Context, io.Writer) error {
 	return nil
 }
 
@@ -57,7 +57,7 @@ func (DummyPage) GetChildren() []components.PageInterface {
 // HTTPMethodOverrideLayer translates PUT/DELETE to POST for LayerUpdate and LayerDelete
 type HTTPMethodOverrideLayer struct{}
 
-func (HTTPMethodOverrideLayer) Next(view views.View, next http.Handler) http.Handler {
+func (HTTPMethodOverrideLayer) Next(_ *views.View, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut || r.Method == http.MethodDelete {
 			r.Method = http.MethodPost
@@ -72,7 +72,7 @@ type JSONResponseLayer[T any] struct {
 	Status int
 }
 
-func (l JSONResponseLayer[T]) Next(view views.View, next http.Handler) http.Handler {
+func (l JSONResponseLayer[T]) Next(_ *views.View, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		w.Header().Set("Content-Type", "application/json")
